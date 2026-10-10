@@ -13,12 +13,11 @@
 //!
 //! Xem rủi ro #17 trong `ROADMAP.md`.
 //!
-//! ## Vì sao vẫn có `bindings_are_in_sync`
+//! ## Kiểm tra lệch bindings
 //!
-//! Test đó nằm trong `lib.rs` và chỉ so sánh nội dung sinh ra với file đã commit. Nó không chạy
-//! được ở môi trường hiện tại, nhưng vẫn giữ vì trên máy khác nó có thể chạy, và nội dung của nó
-//! ghi lại rõ hợp đồng. Việc kiểm tra lệch bindings trong CI nên dùng chính binary này rồi
-//! `git diff --exit-code`.
+//! Không có test nào lo việc này — test binary của crate không nạp được (xem trên). Thay vào đó,
+//! CI chạy chính binary này rồi `git diff --exit-code -- crates/muster-app/src/bindings.ts`.
+//! `npm run codegen` trong `crates/muster-app` cũng gọi đúng binary này.
 
 use std::process::ExitCode;
 

@@ -12,8 +12,9 @@
 //! **hợp đồng** giữa nhánh Rust và nhánh UI (mục 6.0-UI của roadmap): UI không được tự định nghĩa
 //! type cho dữ liệu, mà phải dùng type sinh ra từ đây.
 //!
-//! File bindings được ghi lại mỗi lần chạy bản debug (`npm run tauri dev`), và test
-//! `bindings_are_in_sync` kiểm tra file đã commit còn khớp với code hay không.
+//! File bindings được ghi lại mỗi lần chạy bản debug (`npm run tauri dev`). Việc kiểm tra file
+//! đã commit còn khớp với code hay không do CI làm: chạy `muster-codegen` rồi
+//! `git diff --exit-code -- crates/muster-app/src/bindings.ts`.
 
 use std::path::{Path, PathBuf};
 

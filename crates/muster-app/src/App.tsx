@@ -79,7 +79,7 @@ export function App() {
         <section className="card">
           <h2 className="card__title">M0 — đọc file của Roblox Account Manager</h2>
           <p className="card__text">
-            Bước 0.4 và 0.6 đã xong: <code>core::vault</code> đọc được cả bốn nhánh định dạng,{" "}
+            M0 đã xong: <code>core::vault</code> đọc được cả bốn nhánh định dạng,{" "}
             <code>core::settings</code> chuyển được <code>RAMSettings.ini</code> sang TOML. Phần
             dưới chỉ để chứng minh đường IPC có kiểu đã thông.
           </p>

@@ -3,13 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Frontend (React + TypeScript + Vite) for <PROJECT>",
+  "description": "Frontend (React + TypeScript + Vite) for Muster",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "codegen": "cargo test --manifest-path ../../Cargo.toml -p muster-app -- --ignored regenerate_bindings"
+    "codegen": "cargo run --manifest-path ../../Cargo.toml -p muster-app --bin muster-codegen"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.2",
