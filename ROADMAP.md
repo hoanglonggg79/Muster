@@ -439,8 +439,8 @@ của code. Nguyên tắc: giết rủi ro chưa biết trước khi viết code
 | ~~**0.4**~~ ✅ | ~~`core::vault` + test vector chạy xanh~~ **XONG 2026-10-10** — 58 unit test + 11 test tích hợp, cả 4 fixture giải mã ra dữ liệu giống hệt nhau | Lúc này mới có cơ sở để viết code | 0.1, 0.2, 0.3 |
 | ~~**0.5**~~ ✅ | ~~`tauri-specta` + command xuyên từ React~~ **XONG 2026-10-10** — bindings sinh tự động vào `crates/muster-app/src/bindings.ts`, `tsc --noEmit` xanh | Chứng minh đường IPC có kiểu thông suốt trước khi xây UI thật | 0.3 |
 | ~~**0.6**~~ ✅ | ~~`core::settings` + migration `RAMSettings.ini` → TOML~~ **XONG 2026-10-10** — 6 section, ~40 khoá, giữ nguyên tên khoá của RAM | Độc lập, rủi ro thấp, làm khi rảnh | 0.3 |
-| **0.7** | Wizard nhập liệu + backup ZIP + báo cáo | Cần 0.4 xong | 0.4 |
-| **0.8** | `tracing` + redaction test + CI | Chốt chặn chất lượng, phải có trước khi có gì đáng giữ | 0.3 |
+| ~~**0.7**~~ ✅ | ~~Wizard nhập liệu + backup ZIP + báo cáo~~ **XONG 2026-10-10** — `core::import` + `muster-cli import`, đã chạy nghiệm thu M0 | Cần 0.4 xong | 0.4 |
+| ~~**0.8**~~ ✅ | ~~`tracing` + redaction test + CI~~ **XONG 2026-10-10** — `core::logging` (11 test) + `.github/workflows/ci.yml` | Chốt chặn chất lượng, phải có trước khi có gì đáng giữ | 0.3 |
 
 **Trạng thái 2026-10-10:** 0.1, 0.2, 0.3, **0.4**, **0.5**, **0.6** đã xong. Việc tiếp theo là
 **0.7** (wizard nhập liệu) và **0.8** (tracing + CI).
@@ -539,9 +539,15 @@ chỉ bổ sung phần *thiết kế và hạ tầng*, thứ mà M1–M3 không 
 - [x] ~~Test vector cho cả 4 nhánh vault, kèm fixture đã khử định danh (M)~~ — **XONG 2026-10-10**:
       `crates/muster-core/tests/fixtures/` (4 file + `manifest.json`), sinh bằng
       `tools/fixtures-gen/generate.py`, cả 4 nhánh qua self-check giải mã lại.
-- [ ] Wizard nhập dữ liệu từ RAM: chọn thư mục → phát hiện file → báo cáo → sao lưu → nhập (L)
-- [ ] `tracing` + log file xoay vòng, redaction tự động cho cookie/ticket (S)
-- [ ] CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc --noEmit` (S)
+- [x] ~~Wizard nhập dữ liệu từ RAM: chọn thư mục → phát hiện file → báo cáo → sao lưu → nhập (L)~~
+      — **XONG 2026-10-10** (phần CLI): `core::import` + `muster-cli import --from <dir>`.
+      Có `--dry-run`, `--out`, `--password-stdin`. Wizard trong UI thuộc nhánh UI.
+- [x] ~~`tracing` + log file xoay vòng, redaction tự động cho cookie/ticket (S)~~
+      — **XONG 2026-10-10**: `core::logging`, ghi log xoay vòng theo ngày, `RedactingFormat`
+      khử secret ở đầu ra. 11 test, gồm test ghi ra file thật rồi đọc lại để chắc cookie không lọt.
+- [x] ~~CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc --noEmit` (S)~~
+      — **XONG 2026-10-10**: `.github/workflows/ci.yml`, hai job (Rust trên Windows, Frontend trên
+      Linux). Job Rust chạy thêm một bước kiểm tra bindings TypeScript còn khớp với code Rust.
 - [ ] **Nhánh UI/UX** — design system, wireframe, cài stack frontend (xem mục 6.0-UI). Chạy song song,
       không chặn đường găng; riêng việc ghép dữ liệu thật thì bị chặn bởi 0.5 và M1.
 
@@ -762,6 +768,7 @@ Cần chốt trước hoặc trong M0:
 | 2026-10-10 | Rà soát lần 4. Phát hiện **RAM không có đường đăng nhập bằng API nào** — `user:pass` chỉ được gõ sẵn vào form Chromium (`AccountManager.cs:1396-1417`). **Chốt chiến lược "API trước, browser sau"**, viết tài liệu riêng `docs/BROWSER.md` (3 tầng, luồng UX 7 bước, nguồn tải Chrome for Testing đã kiểm chứng, danh sách thứ KHÔNG copy từ RAM). Thêm task ⭐ vào M1, thêm 6 task browser vào M2/M3. Sửa con số dung lượng: ~150 MB → **~198 MiB** (đo thật). |
 | 2026-10-10 | Rà soát lần 5. **M0 bước 0.3 XONG** — workspace 4 crate dựng được và build xanh (`cargo check --workspace`, `cargo test`, `clippy -D warnings`, `tsc --noEmit`, Vite build). Thêm `tools/rename.sh` (5 bước, đã kiểm chứng bằng một vòng đổi tên thật) và `tools/gen-icons.py`. Ghi lại 2 cạm bẫy build thật đã gặp: xung đột `schemars`/`indexmap` (rủi ro #11) và ICE do cache incremental sau khi đổi tên (rủi ro #13). Mục 7 thêm rủi ro #11–#13. |
 | 2026-10-10 | Rà soát lần 6. Bổ sung **mục 6.0-UI — nhánh UI/UX chạy song song**. Trước đó tài liệu không có bước thiết kế UI nào; các task UI chỉ nằm rải rác ở M1–M3 nên không thấy được toàn cảnh. Ghi rõ điểm phụ thuộc cứng (UI không được tự định nghĩa type dữ liệu — phải chờ `tauri-specta` ở 0.5 và model `Account` ở M1), phân chia sở hữu giữa hai nhánh, và 6 task thiết kế/hạ tầng. Ghi thêm giới hạn đã biết của `rename.sh` ở mục 12. |
+| 2026-10-10 | Rà soát lần 7 — **hoàn tất M0 (0.4 → 0.8)**. Bốn commit. Sửa **ba lỗi thật trong tài liệu này** sau khi kiểm chứng: (1) mục 4.1 ghi "16 byte MAC ở cuối" — sai, MAC ở **đầu**; (2) mục 4.1 coi nhánh 2 và 3 là tách được — **không tách được**, blob phạm vi máy vẫn mở bằng đường CurrentUser; (3) mục 4.4 ghi khoá `ShuffleJobID` — RAM ghi ra `ShuffleJobId`, và danh sách khoá thật nhiều hơn 16. Thêm rủi ro #14 (Argon2 chậm ~20 lần ở profile `dev`), #15 (`tauri-specta` còn là RC), #16 (`Access is denied` trong `target/`), #17 (test binary của `muster-app` không nạp được). Nghiệm thu M0 đã đạt trên thư mục RAM giả lập: 2 tài khoản, file gốc không đổi hash. |
 
 ---
 

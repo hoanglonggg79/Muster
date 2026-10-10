@@ -68,6 +68,13 @@ specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "0.0.12"
 
+# Backup ZIP khi nhập dữ liệu từ RAM (M0 0.7).
+zip = "2"
+
+# Logging + khử secret (M0 0.8).
+regex = "1"
+tracing-appender = "0.2"
+
 [profile.release]
 codegen-units = 1
 lto = true

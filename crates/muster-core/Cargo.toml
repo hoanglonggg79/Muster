@@ -22,6 +22,14 @@ getrandom.workspace = true
 # settings (M0 0.6)
 toml.workspace = true
 
+# import (M0 0.7)
+zip.workspace = true
+
+# logging (M0 0.8)
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+regex.workspace = true
+
 # Hợp đồng type với nhánh UI (M0 0.5). Để sau feature flag chứ không bật mặc định: `muster-core`
 # là crate logic thuần, `muster-cli` dùng nó mà không cần tới specta, và specta v2 hiện vẫn là
 # release candidate. Chỉ `muster-app/src-tauri` bật feature này.
