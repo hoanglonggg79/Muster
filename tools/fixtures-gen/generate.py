@@ -18,7 +18,7 @@ va doi chieu voi native libsodium 1.0.11:
 Xem ROADMAP.md muc 4.1.
 
 Chay:  python tools/fixtures-gen/generate.py
-Ket qua ghi vao: crates/<project>-core/tests/fixtures/
+Ket qua ghi vao: crates/muster-core/tests/fixtures/
 """
 
 from __future__ import annotations

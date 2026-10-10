@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sinh icon placeholder cho <PROJECT>  (tools/gen-icons.py).
+Sinh icon placeholder cho Muster  (tools/gen-icons.py).
 
 Tauri BAT BUOC phai co `icons/icon.ico` de sinh Windows Resource File, ke ca khi
 `bundle.active = false`. Repo chua co logo that, nen script nay ve tam mot icon hinh hoc
@@ -10,7 +10,7 @@ voi tham so khac hoac thay file.
 Chi dung thu vien chuan (zlib, struct) — khong can Pillow.
 
 Chay:  python tools/gen-icons.py
-Ket qua: crates/<project>-app/src-tauri/icons/
+Ket qua: crates/muster-app/src-tauri/icons/
 """
 
 from __future__ import annotations

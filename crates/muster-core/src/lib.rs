@@ -1,6 +1,6 @@
-//! # <PROJECT> core
+//! # Muster core
 //!
-//! Toàn bộ logic của <PROJECT> nằm ở đây. Crate này **không** phụ thuộc Tauri, không phụ thuộc
+//! Toàn bộ logic của Muster nằm ở đây. Crate này **không** phụ thuộc Tauri, không phụ thuộc
 //! WinForms, không phụ thuộc bất cứ thứ gì chỉ chạy được trong GUI. Mọi thứ trong đây phải
 //! dùng được từ `muster-cli` và kiểm thử được bằng `cargo test` thuần.
 //!

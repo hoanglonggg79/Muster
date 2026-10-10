@@ -1,16 +1,16 @@
-# <PROJECT>
+# Muster
 
 Ứng dụng desktop quản lý nhiều tài khoản Roblox và mở game, kế thừa **Roblox Account Manager**
 (tiền thân: RBX Alt Manager, tác giả ic3w0lf22 — dự án đã ngừng phát triển).
 
 Windows. Rust + Tauri 2 + React + TypeScript. Giấy phép **GPL-3.0**.
 
-> **Tên dự án chưa chốt.** Codename tạm là `muster`. Đổi tên bằng một lệnh:
+> **Tên dự án chưa chốt.** Codename tạm là `Muster`. Đổi tên bằng một lệnh:
 > `tools/rename.sh <TenMoi>` — xem `ROADMAP.md` mục 12.
 
 ## Trạng thái
 
-Đang ở **M0 — Nền móng**. Xem `ROADMAP.md` mục 6.0 để biết thứ tự thực thi.
+**M0 đã xong hoàn toàn (0.1 → 0.8).** Việc tiếp theo là **M1** — xem `ROADMAP.md` mục 6.
 
 | Bước | Việc | Trạng thái |
 | :--- | :--- | :--- |
@@ -56,7 +56,7 @@ Nếu bạn thấy mình đang viết thuật toán trong `src-tauri` — chuy�
 ## Yêu cầu
 
 - Windows 10/11
-- Rust 1.85+ (đã ghim ở `rust-toolchain.toml`)
+- Rust — kênh ghim ở `rust-toolchain.toml` (MSRV 1.85)
 - Node 20+
 - WebView2 Runtime (Win11 và Win10 21H2+ có sẵn)
 

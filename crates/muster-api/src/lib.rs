@@ -1,4 +1,4 @@
-//! # <PROJECT> local API
+//! # Muster local API
 //!
 //! Tái lập local HTTP API của Roblox Account Manager: **22 route** cộng `/Running` và
 //! `/favicon.ico`. Hợp đồng đầy đủ ở `ROADMAP.md` mục 4.2.

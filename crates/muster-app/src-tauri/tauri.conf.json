@@ -30,7 +30,7 @@
     "targets": ["msi", "nsis"],
     "category": "Utility",
     "shortDescription": "Account manager for Roblox",
-    "longDescription": "<PROJECT> — account manager for Roblox. Ke thua Roblox Account Manager (GPL-3.0).",
+    "longDescription": "Muster — account manager for Roblox. Ke thua Roblox Account Manager (GPL-3.0).",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -279,7 +279,7 @@ pub struct MigrationReport {
     pub warnings: Vec<String>,
 }
 
-/// Chuyển dữ liệu từ một bản cài RAM sang thư mục dữ liệu của `<PROJECT>`.
+/// Chuyển dữ liệu từ một bản cài RAM sang thư mục dữ liệu của `Muster`.
 ///
 /// Thứ tự bắt buộc: **sao lưu ZIP trước**, rồi mới ghi. File gốc của RAM không bị sửa.
 ///
@@ -333,7 +333,7 @@ pub fn migrate(
     if install.no_encryption_flag {
         warnings.push(
             "bản cài RAM có file cờ NoEncryption... nghĩa là RAM đang ghi plaintext. \
-             <PROJECT> không tự tạo file cờ này."
+             Muster không tự tạo file cờ này."
                 .to_owned(),
         );
     }

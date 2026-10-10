@@ -1,31 +1,27 @@
-# ROADMAP — `<PROJECT>`
+# ROADMAP — `Muster`
 
 > Ứng dụng quản lý nhiều tài khoản Roblox và mở game, kế thừa Roblox Account Manager (RAM).
 >
-> **Trạng thái:** Đang ở **M0 — Nền móng**, bước **0.4**. Workspace 4 crate đã dựng, build xanh.
+> **Trạng thái:** **M0 xong hoàn toàn (0.1 → 0.8).** Việc tiếp theo là **M1**.
 > Nguồn tham chiếu để port là `RAM_Source/` (C# WinForms, .NET 4.7.2, ~16.000 dòng, license GPL-3.0).
 >
-> **Tên dự án:** CHƯA CHỐT. Toàn bộ tài liệu này dùng placeholder — xem mục 1.
+> **Tên dự án:** codename tạm **`Muster`**, chưa chốt tên thật — xem mục 1.
 
 ---
 
-## 1. Quy ước placeholder
+## 1. Tên dự án
 
-Tên dự án chưa được chốt. Khi chốt, thay các placeholder sau bằng giá trị thật (tìm & thay toàn repo):
-
-| Placeholder | Ý nghĩa | Quy tắc | Ví dụ nếu chọn "Muster" |
-| :--- | :--- | :--- | :--- |
-| `<PROJECT>` | Tên hiển thị, dùng trong UI, tiêu đề cửa sổ, tài liệu | PascalCase, không chứa chữ "Roblox" | `Muster` |
-| `<project>` | Tên crate / package | kebab-case, chữ thường | `muster` |
-| `<slug>` | Tên repo, domain, bundle identifier | lowercase, không dấu | `muster` |
-| `<BINARY>` | Tên file thực thi | PascalCase | `Muster.exe` |
+Tên thật **chưa chốt**. Toàn repo dùng codename tạm **`Muster`** — crate/bundle id viết thường
+`muster`, file thực thi `Muster.exe`. Không còn placeholder nào trong mã nguồn hay tài liệu.
+Nguồn duy nhất của tên là `[workspace.metadata.project]` trong `Cargo.toml`; đổi tên bằng một lệnh
+`tools/rename.sh <TenMoi>` (xem mục 12).
 
 **Quy tắc đặt tên bắt buộc:**
 
 - KHÔNG đưa "Roblox" vào tên sản phẩm, tên crate, bundle id, hay domain. Chỉ dùng dạng phụ đề mô tả:
-  `<PROJECT> — account manager for Roblox`.
-- Bundle identifier Tauri: `dev.<slug>.app` (không dùng `com.roblox.*`).
-- Tên crate gợi ý: `<project>-core`, `<project>-cli`, `<project>-app`, `<project>-api`.
+  `Muster — account manager for Roblox`.
+- Bundle identifier Tauri: `dev.muster.app` (không dùng `com.roblox.*`).
+- Tên crate: `muster-core`, `muster-cli`, `muster-app`, `muster-api`.
 
 ---
 
@@ -38,7 +34,7 @@ Những điều sau KHÔNG được vi phạm trong bất kỳ milestone nào. N
    tạo named mutex, đọc/ghi `ClientSettings`. Lý do: Byfron/Hyperion và rủi ro khoá tài khoản.
 2. **Tương thích ngược là ưu tiên cao hơn tính đẹp của code.** Người dùng RAM phải chuyển sang được
    mà không mất dữ liệu và không phải cấu hình lại. Xem mục 4 — Hợp đồng tương thích ngược.
-3. **Logic không nằm trong `src-tauri/`.** Mọi thứ phải dùng được từ `<project>-cli` và test được
+3. **Logic không nằm trong `src-tauri/`.** Mọi thứ phải dùng được từ `muster-cli` và test được
    bằng `cargo test` mà không cần khởi động Tauri.
 4. **Secret không bao giờ chạm đĩa dạng plaintext.** Cookie, password, auth ticket phải nằm trong
    vùng nhớ được zeroize sau khi dùng. Log không bao giờ ghi cookie/ticket/password.
@@ -63,16 +59,16 @@ Những điều sau KHÔNG được vi phạm trong bất kỳ milestone nào. N
 └──────────────────────┬─────────────────────────────────┘
                        │  IPC có kiểu (tauri-specta sinh type TS)
 ┌──────────────────────┴─────────────────────────────────┐
-│  <project>-app  (binary Tauri 2, chỉ là lớp vỏ)        │
+│  muster-app  (binary Tauri 2, chỉ là lớp vỏ)           │
 └──────────────────────┬─────────────────────────────────┘
                        │
 ┌──────────────────────┴─────────────────────────────────┐
-│  <project>-core  (thư viện thuần Rust, không Tauri)    │
+│  muster-core  (thư viện thuần Rust, không Tauri)       │
 │  vault · roblox::* · launcher · watcher · patch        │
 └───┬────────────────┬─────────────────┬─────────────────┘
     │                │                 │
 ┌───┴──────────┐ ┌───┴──────────┐ ┌────┴───────────────┐
-│ <project>-api│ │ <project>-cli│ │ crate `windows`    │
+│ muster-api   │ │ muster-cli   │ │ crate `windows`    │
 │ axum + WS    │ │ headless     │ │ Win32 · registry   │
 └──────────────┘ └──────────────┘ └────────────────────┘
 ```
@@ -80,33 +76,33 @@ Những điều sau KHÔNG được vi phạm trong bất kỳ milestone nào. N
 ### 3.2 Cây thư mục mục tiêu
 
 ```
-<slug>/
-├─ Cargo.toml                  # workspace root
-├─ ROADMAP.md                  # tài liệu này
-├─ LICENSE                     # GPL-3.0
+muster/
+├─ Cargo.toml                     # workspace root
+├─ ROADMAP.md                     # tài liệu này
+├─ LICENSE                        # GPL-3.0
 ├─ crates/
-│  ├─ <project>-core/          # logic thuần, phần lớn giá trị nằm ở đây
+│  ├─ muster-core/                # logic thuần, phần lớn giá trị nằm ở đây
 │  │  └─ src/
-│  │     ├─ vault/             # mã hoá, migration AccountData.json
-│  │     ├─ roblox/            # auth, account, games, servers, presence, batch, models
-│  │     ├─ launch/            # ticket → join script → spawn
-│  │     ├─ watcher/           # quét process, tail log, regex
-│  │     ├─ patch/             # ClientSettings / FPS unlocker
-│  │     ├─ nexus/             # protocol WS điều khiển client
-│  │     └─ settings/          # config + migration RAMSettings.ini
-│  ├─ <project>-api/           # HTTP API + WS server
-│  ├─ <project>-cli/           # binary headless
-│  └─ <project>-app/           # binary Tauri 2
-│     ├─ src-tauri/            # chỉ chứa command wrapper + setup
-│     └─ src/                  # frontend React
+│  │     ├─ vault/                # mã hoá, migration AccountData.json
+│  │     ├─ roblox/               # auth, account, games, servers, presence, batch, models
+│  │     ├─ launch/               # ticket → join script → spawn
+│  │     ├─ watcher/              # quét process, tail log, regex
+│  │     ├─ patch/                # ClientSettings / FPS unlocker
+│  │     ├─ nexus/                # protocol WS điều khiển client
+│  │     └─ settings/             # config + migration RAMSettings.ini
+│  ├─ muster-api/                 # HTTP API + WS server
+│  ├─ muster-cli/                 # binary headless
+│  └─ muster-app/                 # binary Tauri 2
+│     ├─ src-tauri/               # chỉ chứa command wrapper + setup
+│     └─ src/                     # frontend React
 ├─ assets/
-│  ├─ lua/                     # Nexus.lua, RAMAccount.lua (port nguyên)
+│  ├─ lua/                        # Nexus.lua, RAMAccount.lua (port nguyên)
 │  └─ icons/
 └─ docs/
-   ├─ COMPATIBILITY.md         # đặc tả định dạng file & API
-   ├─ API.md                   # tài liệu local HTTP API
-   ├─ BROWSER.md               # chiến lược đăng nhập: API trước, browser sau (ĐÃ CHỐT)
-   └─ NEXUS.md                 # protocol Nexus
+   ├─ COMPATIBILITY.md            # đặc tả định dạng file & API
+   ├─ API.md                      # tài liệu local HTTP API
+   ├─ BROWSER.md                  # chiến lược đăng nhập: API trước, browser sau (ĐÃ CHỐT)
+   └─ NEXUS.md                    # protocol Nexus
 ```
 
 ### 3.3 Tech stack
@@ -153,7 +149,7 @@ kiểm chứng trực tiếp từ `RAM_Source/`.
 
 ### 4.1 Định dạng `AccountData.json` cần đọc được
 
-RAM có **4 nhánh định dạng**. Trình nhập của `<PROJECT>` phải nhận diện và xử lý cả 4:
+RAM có **4 nhánh định dạng**. Trình nhập của `Muster` phải nhận diện và xử lý cả 4:
 
 | # | Nhánh | Nhận diện | Cách giải mã |
 | :--- | :--- | :--- | :--- |
@@ -260,18 +256,18 @@ ROBLOX ACCOUNT MANAGER | :) | BROUGHT TO YOU BUY ic3w0lf
 | `RecentGames.json` | Danh sách game gần đây, JSON riêng |
 | `RAMSettings.ini` | Toàn bộ cấu hình, INI |
 | `NoEncryption.IUnderstandTheRisks.iautamor` | File cờ. **Đã kiểm chứng lại tại `AccountManager.cs:377-380`:** cờ tồn tại → ghi **plain UTF-8 JSON**; cờ không tồn tại → ghi **DPAPI `LocalMachine`** + entropy. Chiều đọc (`AccountManager.cs:294-298`) chỉ thử **CurrentUser** rồi fallback plain JSON — **không thử LocalMachine**. Trình nhập phải thử lần lượt CurrentUser → LocalMachine → plain JSON để không bỏ sót file do chính RAM ghi ra |
-| `handle.bin` | Bản sao `handle.exe`, `<PROJECT>` sẽ không dùng nữa |
+| `handle.bin` | Bản sao `handle.exe`, `Muster` sẽ không dùng nữa |
 
 **Yêu cầu bắt buộc với trình nhập:**
 
 - [ ] Nhập **không phá huỷ**: chỉ đọc, không ghi đè file gốc của RAM.
-- [ ] Nếu người dùng chọn chuyển hẳn: tạo bản sao lưu `<project>-backup-<timestamp>.zip` chứa toàn bộ
+- [ ] Nếu người dùng chọn chuyển hẳn: tạo bản sao lưu `muster-backup-<timestamp>.zip` chứa toàn bộ
       file trên TRƯỚC khi ghi bất cứ thứ gì.
 - [ ] Hiển thị báo cáo nhập: số account đọc được, số bị lỗi, nhánh định dạng đã dùng.
 - [ ] Giữ nguyên `Account.Fields` (dictionary tuỳ ý) — đây là nơi RAM lưu vị trí cửa sổ
       (`Window_Position_X/Y`, `Window_Width/Height`) và các field người dùng tự thêm.
 - [ ] Giữ nguyên `Group`, `Alias`, `Description`, `Password`, `LastUse`, `BrowserTrackerID`, `UserID`.
-- [ ] Có test vector: 1 file cho mỗi nhánh, nằm trong `crates/<project>-core/tests/fixtures/`
+- [ ] Có test vector: 1 file cho mỗi nhánh, nằm trong `crates/muster-core/tests/fixtures/`
       (đã khử định danh, không chứa cookie thật).
 
 ### 4.2 Local HTTP API — 22 route phải giữ nguyên
@@ -341,29 +337,23 @@ Ngoài 22 route: giữ thêm `/Running` và `/favicon.ico`.
 
 ### 4.4 Định dạng cấu hình `RAMSettings.ini`
 
-- [x] ~~Viết migration đọc INI cũ → config mới (`toml`), giữ nguyên giá trị, không hỏi lại người dùng.~~
-      **XONG 2026-10-10** — `core::settings`, xem ghi chú bên dưới.
-- [x] ~~Giữ nguyên tên khoá để người dùng có thể tự sửa file nếu muốn~~ **XONG 2026-10-10**.
-      Danh sách dưới đây là 16 khoá mà bản đầu của tài liệu liệt kê:
-      `WebServerPort`, `NexusPort`, `EnableMultiRbx`, `SavePasswords`, `AllowExternalConnections`,
-      `EveryRequestRequiresPassword`, `AllowGetAccounts`, `AllowGetCookie`, `AllowLaunchAccount`,
-      `ShuffleJobID`, `AutoCloseLastProcess`, `UnlockFPS`, `MaxFPSValue`, `CustomClientSettings`,
-      `ScaleFonts`, `DevMode`.
-      ⚠️ **Hai điểm đã sửa khi đối chiếu `RAM_Source/`:**
-      1. **Khoá thật là `ShuffleJobId`, không phải `ShuffleJobID`.** `AccountManager.cs:2079` ghi ra
-         chữ `d` thường. Bản port ghi ra `ShuffleJobId` và khi đọc chấp nhận cả hai cách viết.
-      2. **Danh sách thật nhiều hơn 16 khoá.** `AccountManager.cs:121-165` đặt mặc định cho khoảng
-         40 khoá trải trên 6 section (`General`, `Developer`, `WebServer`, `AccountControl`,
-         `Watcher`, `Prompts`). Migration đọc hết, và mọi khoá/section không mô hình hoá được vẫn
-         giữ nguyên trong catch-all nên không mất dữ liệu.
-- [x] ~~File `RAMSettings.ini` gốc phải được sao lưu, không xoá.~~ **XONG 2026-10-10** —
-      `settings::backup_file()` ghi bản sao `<tên>.backup-<unix_giây>` trước khi ghi bất cứ thứ gì.
+**XONG 2026-10-10** — `core::settings` + `core::settings::ini`. Migration đọc INI cũ → TOML, giữ
+nguyên giá trị và không hỏi lại người dùng; giữ nguyên tên section và tên khoá của RAM để người
+dùng vẫn tự sửa file được; `settings::backup_file()` ghi bản sao `<tên>.backup-<unix_giây>` trước
+khi ghi bất cứ thứ gì.
+
+- **Khoá thật là `ShuffleJobId`, không phải `ShuffleJobID`.** `AccountManager.cs:2079` ghi ra chữ
+  `d` thường. Bản port ghi ra `ShuffleJobId` và khi đọc chấp nhận cả hai cách viết.
+- **Danh sách thật nhiều hơn 16 khoá.** `AccountManager.cs:121-165` đặt mặc định cho khoảng **40
+  khoá** trải trên **6 section** (`General`, `Developer`, `WebServer`, `AccountControl`, `Watcher`,
+  `Prompts`). Migration đọc hết; mọi khoá/section không mô hình hoá được vẫn giữ nguyên trong
+  catch-all nên không mất dữ liệu.
 
 ---
 
 ## 5. Bảng tái sử dụng `RAM_Source`
 
-| File trong RAM_Source | Nội dung | Đích trong `<PROJECT>` | Trạng thái |
+| File trong RAM_Source | Nội dung | Đích trong `Muster` | Trạng thái |
 | :--- | :--- | :--- | :--- |
 | `Classes/Account.cs` | CSRF, auth ticket, join, block, avatar, quick login, fields | `core::roblox::account` | Port 1:1 |
 | `Classes/Cryptography.cs` | Argon2 + secretbox, layout file | `core::vault` | Port 1:1 |
@@ -401,7 +391,7 @@ Ngoài 22 route: giữ thêm `/Running` và `/favicon.ico`.
   - Hệ quả 2: khi Puppeteer không khả dụng, `AccountManager_Shown` **gỡ luôn**
     `bulkUserPassToolStripMenuItem` và `customURLJSToolStripMenuItem` khỏi menu. Tức tính năng
     nhập hàng loạt user:pass **phụ thuộc hoàn toàn** vào browser.
-  - ⇒ `<PROJECT>` có cơ hội làm tốt hơn: tự gọi API login để không phải tải ~150 MB Chromium
+  - ⇒ `Muster` có cơ hội làm tốt hơn: tự gọi API login để không phải tải ~150 MB Chromium
     cho những tài khoản chỉ cần user:pass. Xem task mới ở M1.
 - Body của request login (đọc từ `AccountBrowser.cs:309-312`): có khoá `ctype` với giá trị `Username`
   và khoá `password`. Tên khoá chứa username cần xác minh lại khi code (khả năng cao là `cvalue`).
@@ -433,28 +423,21 @@ của code. Nguyên tắc: giết rủi ro chưa biết trước khi viết code
 
 | Bước | Việc | Vì sao ở đúng vị trí này | Chặn bởi |
 | :--- | :--- | :--- | :--- |
-| ~~**0.1**~~ ✅ | ~~Sinh test vector vault thật (1 file mỗi nhánh, đã khử định danh)~~ **XONG 2026-10-10** | Là *hợp đồng* cho toàn bộ `core::vault`. Không có nó thì mọi dòng code vault chỉ là phỏng đoán | — |
-| ~~**0.2**~~ ✅ | ~~Chốt ánh xạ `StrengthArgon.Moderate` → `(t, m, p)`~~ **XONG 2026-10-10** → `t=6, m=131072 KiB, p=1` | Rủi ro #6. Biết Argon2i rồi vẫn phải biết `t_cost` | 0.1 |
-| ~~**0.3**~~ ✅ | ~~Scaffold workspace 4 crate + `tools/rename.sh`~~ **XONG 2026-10-10** | Sau 0.2 vì tên crate phụ thuộc tên dự án, và ta muốn rename được | 0.2 (mềm) |
-| ~~**0.4**~~ ✅ | ~~`core::vault` + test vector chạy xanh~~ **XONG 2026-10-10** — 58 unit test + 11 test tích hợp, cả 4 fixture giải mã ra dữ liệu giống hệt nhau | Lúc này mới có cơ sở để viết code | 0.1, 0.2, 0.3 |
-| ~~**0.5**~~ ✅ | ~~`tauri-specta` + command xuyên từ React~~ **XONG 2026-10-10** — bindings sinh tự động vào `crates/muster-app/src/bindings.ts`, `tsc --noEmit` xanh | Chứng minh đường IPC có kiểu thông suốt trước khi xây UI thật | 0.3 |
-| ~~**0.6**~~ ✅ | ~~`core::settings` + migration `RAMSettings.ini` → TOML~~ **XONG 2026-10-10** — 6 section, ~40 khoá, giữ nguyên tên khoá của RAM | Độc lập, rủi ro thấp, làm khi rảnh | 0.3 |
-| ~~**0.7**~~ ✅ | ~~Wizard nhập liệu + backup ZIP + báo cáo~~ **XONG 2026-10-10** — `core::import` + `muster-cli import`, đã chạy nghiệm thu M0 | Cần 0.4 xong | 0.4 |
-| ~~**0.8**~~ ✅ | ~~`tracing` + redaction test + CI~~ **XONG 2026-10-10** — `core::logging` (11 test) + `.github/workflows/ci.yml` | Chốt chặn chất lượng, phải có trước khi có gì đáng giữ | 0.3 |
+| **0.1** ✅ | Sinh test vector vault thật (1 file mỗi nhánh, đã khử định danh) | Là *hợp đồng* cho toàn bộ `core::vault`. Không có nó thì mọi dòng code vault chỉ là phỏng đoán | — |
+| **0.2** ✅ | Chốt ánh xạ `StrengthArgon.Moderate` → `(t, m, p)` = `t=6, m=131072 KiB, p=1` | Rủi ro #6. Biết Argon2i rồi vẫn phải biết `t_cost` | 0.1 |
+| **0.3** ✅ | Scaffold workspace 4 crate + `tools/rename.sh` | Sau 0.2 vì tên crate phụ thuộc tên dự án, và ta muốn rename được | 0.2 (mềm) |
+| **0.4** ✅ | `core::vault` + test vector chạy xanh (cả 4 fixture giải mã ra dữ liệu giống hệt nhau) | Lúc này mới có cơ sở để viết code | 0.1, 0.2, 0.3 |
+| **0.5** ✅ | `tauri-specta` + command xuyên từ React → `bindings.ts`, `tsc --noEmit` xanh | Chứng minh đường IPC có kiểu thông suốt trước khi xây UI thật | 0.3 |
+| **0.6** ✅ | `core::settings` + migration `RAMSettings.ini` → TOML (6 section, ~40 khoá) | Độc lập, rủi ro thấp, làm khi rảnh | 0.3 |
+| **0.7** ✅ | Wizard nhập liệu + backup ZIP + báo cáo → `core::import` + `muster-cli import` | Cần 0.4 xong | 0.4 |
+| **0.8** ✅ | `tracing` + redaction test + CI → `core::logging` + `.github/workflows/ci.yml` | Chốt chặn chất lượng, phải có trước khi có gì đáng giữ | 0.3 |
 
-**Trạng thái 2026-10-10:** 0.1, 0.2, 0.3, **0.4**, **0.5**, **0.6** đã xong. Việc tiếp theo là
-**0.7** (wizard nhập liệu) và **0.8** (tracing + CI).
-Workspace build được cả 4 crate (`cargo check --workspace` xanh), `cargo test` xanh,
-`tsc --noEmit` xanh, frontend build ra `dist/`. `tools/rename.sh` đã được kiểm chứng bằng một vòng
-đổi tên thật trên bản sao (đổi sang tên khác rồi khôi phục, cả hai chiều đều xanh).
+**Trạng thái:** cả 8 bước **XONG**. Workspace build được cả 4 crate (`cargo check --workspace`
+xanh), `cargo test` xanh, `tsc --noEmit` xanh, frontend build ra `dist/`. `tools/rename.sh` đã
+được kiểm chứng bằng một vòng đổi tên thật trên bản sao (đổi rồi khôi phục, cả hai chiều đều xanh).
 
-**Baseline git:** repo đã `git init` nhưng tới 2026-10-10 vẫn **chưa có commit nào**. Đã chốt
-baseline ở lần làm việc này; từ đây mỗi bước xong phải có commit riêng.
-
-**Hợp đồng hai nhánh đã có thật:** `crates/muster-app/src/bindings.ts` được sinh từ code Rust và
-đã chứa `Account`, `Branch`, `Format`, cùng hai command `vaultInspect` / `vaultOpen`. Nhánh UI từ
-đây **được phép** bắt đầu dựng component bằng dữ liệu giả dựa trên type đó — nhưng vẫn chưa được
-ghép dữ liệu thật cho tới khi M1 có model `Account` đầy đủ.
+**Baseline git:** từ 2026-10-10 repo đã có commit; từ đây mỗi bước xong phải có commit riêng.
+Hợp đồng type giữa hai nhánh nằm ở `crates/muster-app/src/bindings.ts` — chi tiết ở mục 6.0-UI.
 
 ---
 
@@ -523,37 +506,33 @@ chỉ bổ sung phần *thiết kế và hạ tầng*, thứ mà M1–M3 không 
 
 > Mục tiêu: có khung repo chạy được, vault đọc được dữ liệu RAM cũ, IPC có kiểu hoạt động.
 
-- [x] ~~Scaffold Cargo workspace 4 crate + frontend Vite/React/TS (M)~~ — **XONG 2026-10-10**:
-      `cargo check --workspace` xanh, `cargo test` xanh, `tsc --noEmit` xanh, `tools/rename.sh` xong.
-- [x] ~~Cấu hình `tauri-specta` sinh type TypeScript từ command Rust (M)~~
-      — **XONG 2026-10-10**: `muster-app/src-tauri/src/lib.rs` dựng `Builder`, hai command
-      `vault_inspect` / `vault_open`, bindings ghi ra `crates/muster-app/src/bindings.ts`.
-      Sinh lại bằng `npm run codegen`. Xem rủi ro #17 về việc crate này không chạy được `cargo test`.
-- [x] ~~`core::settings`: model config + đọc `RAMSettings.ini` cũ, migration sang TOML (M)~~
-      — **XONG 2026-10-10**: `core::settings` + `core::settings::ini`, giữ nguyên tên section và
-      tên khoá của RAM, catch-all nên không mất khoá lạ, `backup_file()` sao lưu file gốc.
-- [x] ~~`core::vault`: 4 nhánh giải mã ở mục 4.1 + API ghi lại (L)~~ — **XONG 2026-10-10**:
-      `derive_key` (SHA-512 → Argon2i), `open_password_locked`/`seal_password_locked`,
-      `vault::dpapi`, `open()` tự dò nhánh, `read_accounts`/`accounts_to_bytes`.
-      Kèm `core::models::Account` khớp từng field với `Classes/Account.cs`.
-- [x] ~~Test vector cho cả 4 nhánh vault, kèm fixture đã khử định danh (M)~~ — **XONG 2026-10-10**:
-      `crates/muster-core/tests/fixtures/` (4 file + `manifest.json`), sinh bằng
-      `tools/fixtures-gen/generate.py`, cả 4 nhánh qua self-check giải mã lại.
-- [x] ~~Wizard nhập dữ liệu từ RAM: chọn thư mục → phát hiện file → báo cáo → sao lưu → nhập (L)~~
-      — **XONG 2026-10-10** (phần CLI): `core::import` + `muster-cli import --from <dir>`.
-      Có `--dry-run`, `--out`, `--password-stdin`. Wizard trong UI thuộc nhánh UI.
-- [x] ~~`tracing` + log file xoay vòng, redaction tự động cho cookie/ticket (S)~~
-      — **XONG 2026-10-10**: `core::logging`, ghi log xoay vòng theo ngày, `RedactingFormat`
-      khử secret ở đầu ra. 11 test, gồm test ghi ra file thật rồi đọc lại để chắc cookie không lọt.
-- [x] ~~CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc --noEmit` (S)~~
-      — **XONG 2026-10-10**: `.github/workflows/ci.yml`, hai job (Rust trên Windows, Frontend trên
-      Linux). Job Rust chạy thêm một bước kiểm tra bindings TypeScript còn khớp với code Rust.
-- [ ] **Nhánh UI/UX** — design system, wireframe, cài stack frontend (xem mục 6.0-UI). Chạy song song,
-      không chặn đường găng; riêng việc ghép dữ liệu thật thì bị chặn bởi 0.5 và M1.
+**XONG 2026-10-10.** Chi tiết:
 
-**Nghiệm thu M0:** chạy `<project>-cli import --from <thư_mục_RAM>` trên một bản cài RAM thật, nhập
+- **Scaffold** Cargo workspace 4 crate + frontend Vite/React/TS; `tools/rename.sh` xong (M).
+- **`tauri-specta`** sinh type TypeScript từ command Rust: `muster-app/src-tauri/src/lib.rs` dựng
+  `Builder`, hai command `vault_inspect` / `vault_open`, bindings ghi ra
+  `crates/muster-app/src/bindings.ts`. Sinh lại bằng `npm run codegen`. Xem rủi ro #17 về việc crate
+  này không chạy được `cargo test` (M).
+- **`core::settings`** + `core::settings::ini`: giữ nguyên tên section và tên khoá của RAM, catch-all
+  nên không mất khoá lạ, `backup_file()` sao lưu file gốc (M).
+- **`core::vault`**: 4 nhánh giải mã ở mục 4.1 + API ghi lại — `derive_key` (SHA-512 → Argon2i),
+  `open_password_locked` / `seal_password_locked`, `vault::dpapi`, `open()` tự dò nhánh,
+  `read_accounts` / `accounts_to_bytes`. Kèm `core::models::Account` khớp từng field với
+  `Classes/Account.cs` (L).
+- **Test vector** cho cả 4 nhánh vault: `crates/muster-core/tests/fixtures/` (4 file + `manifest.json`),
+  sinh bằng `tools/fixtures-gen/generate.py`, cả 4 nhánh qua self-check giải mã lại (M).
+- **Wizard nhập dữ liệu từ RAM** (phần CLI): `core::import` + `muster-cli import --from <dir>`, có
+  `--dry-run`, `--out`, `--password-stdin`. Wizard trong UI thuộc nhánh UI (L).
+- **`tracing`** + log xoay vòng theo ngày + `RedactingFormat` khử secret ở đầu ra. 11 test, gồm test
+  ghi ra file thật rồi đọc lại để chắc cookie không lọt (S).
+- **CI**: `.github/workflows/ci.yml`, hai job (Rust trên Windows, Frontend trên Linux). Job Rust chạy
+  thêm bước kiểm bindings TypeScript còn khớp với code Rust (S).
+- **Nhánh UI/UX** — design system, wireframe, cài stack frontend (xem mục 6.0-UI). Chạy song song,
+  không chặn đường găng; riêng ghép dữ liệu thật thì bị chặn bởi 0.5 và M1. **(chưa làm)**
+
+**Nghiệm thu M0:** chạy `muster-cli import --from <thư_mục_RAM>` trên một bản cài RAM thật, nhập
 đúng số account, không sửa file gốc, và một test tự động chứng minh giải mã được file
-password-locked.
+password-locked. **Đã đạt** trên thư mục RAM giả lập: 2 tài khoản, hash 4 file gốc không đổi.
 
 ---
 
@@ -661,7 +640,7 @@ qua kênh có ký số thành công.
 - [ ] `core::vault`: backend macOS dùng Keychain thay DPAPI (M)
 - [ ] `core::launch`: macOS — mở qua `open` với URL scheme tương đương (L)
 - [ ] `core::patch`: macOS — đường dẫn `ClientSettings` khác (M)
-- [ ] `<project>-cli` hoàn chỉnh: `import`, `export`, `list`, `launch`, `serve`, `watch` (L)
+- [ ] `muster-cli` hoàn chỉnh: `import`, `export`, `list`, `launch`, `serve`, `watch` (L)
 - [ ] Chế độ daemon: chạy nền không GUI, dùng được trên VPS (M)
 - [ ] Docker image cho chế độ headless (S)
 - [ ] Đóng gói: MSI/NSIS (Windows), DMG (macOS) (M)
@@ -760,37 +739,36 @@ Cần chốt trước hoặc trong M0:
 
 ## 11. Nhật ký thay đổi tài liệu
 
-| Ngày | Thay đổi |
-| :--- | :--- |
-| 2026-10-10 | Bản đầu. Dựa trên phân tích trực tiếp `RAM_Source/` (16.015 dòng C#). |
-| 2026-10-10 | Rà soát lần 2. **Xác minh được biến thể Argon2 = Argon2i v1.3** (libsodium-net 0.10.0 + libsodium.dll 1.0.11), đóng rủi ro #6 ở mức "biết chắc thuật toán". Ghi lại offset thực tế của `RAMHeader`/salt/nonce. Xác nhận URL regex từ xa là raw GitHub không ký (`RobloxProcess.cs:45`). Thêm mục 6.0 (thứ tự thực thi M0) và mục 12 (chiến lược tên tạm). |
-| 2026-10-10 | Rà soát lần 3. **Chốt hoàn toàn tham số Argon2** bằng dịch ngược IL `Sodium.dll` + chạy lại trên native libsodium 1.0.11: `StrengthArgon.Moderate` = `Argon2i v1.3, t=6, m=131072 KiB, p=1, out=32`. Sửa lại giá trị `opslimit` sai trong bản đầu (8388608 → 6). Sửa ghi chú sai về cờ `NoEncryption...`. **Chốt phạm vi: chỉ Windows** — mục 10 câu hỏi #2 đã trả lời, M4 (macOS) chuyển thành backlog không cam kết. |
-| 2026-10-10 | Rà soát lần 4. Phát hiện **RAM không có đường đăng nhập bằng API nào** — `user:pass` chỉ được gõ sẵn vào form Chromium (`AccountManager.cs:1396-1417`). **Chốt chiến lược "API trước, browser sau"**, viết tài liệu riêng `docs/BROWSER.md` (3 tầng, luồng UX 7 bước, nguồn tải Chrome for Testing đã kiểm chứng, danh sách thứ KHÔNG copy từ RAM). Thêm task ⭐ vào M1, thêm 6 task browser vào M2/M3. Sửa con số dung lượng: ~150 MB → **~198 MiB** (đo thật). |
-| 2026-10-10 | Rà soát lần 5. **M0 bước 0.3 XONG** — workspace 4 crate dựng được và build xanh (`cargo check --workspace`, `cargo test`, `clippy -D warnings`, `tsc --noEmit`, Vite build). Thêm `tools/rename.sh` (5 bước, đã kiểm chứng bằng một vòng đổi tên thật) và `tools/gen-icons.py`. Ghi lại 2 cạm bẫy build thật đã gặp: xung đột `schemars`/`indexmap` (rủi ro #11) và ICE do cache incremental sau khi đổi tên (rủi ro #13). Mục 7 thêm rủi ro #11–#13. |
-| 2026-10-10 | Rà soát lần 6. Bổ sung **mục 6.0-UI — nhánh UI/UX chạy song song**. Trước đó tài liệu không có bước thiết kế UI nào; các task UI chỉ nằm rải rác ở M1–M3 nên không thấy được toàn cảnh. Ghi rõ điểm phụ thuộc cứng (UI không được tự định nghĩa type dữ liệu — phải chờ `tauri-specta` ở 0.5 và model `Account` ở M1), phân chia sở hữu giữa hai nhánh, và 6 task thiết kế/hạ tầng. Ghi thêm giới hạn đã biết của `rename.sh` ở mục 12. |
-| 2026-10-10 | Rà soát lần 7 — **hoàn tất M0 (0.4 → 0.8)**. Bốn commit. Sửa **ba lỗi thật trong tài liệu này** sau khi kiểm chứng: (1) mục 4.1 ghi "16 byte MAC ở cuối" — sai, MAC ở **đầu**; (2) mục 4.1 coi nhánh 2 và 3 là tách được — **không tách được**, blob phạm vi máy vẫn mở bằng đường CurrentUser; (3) mục 4.4 ghi khoá `ShuffleJobID` — RAM ghi ra `ShuffleJobId`, và danh sách khoá thật nhiều hơn 16. Thêm rủi ro #14 (Argon2 chậm ~20 lần ở profile `dev`), #15 (`tauri-specta` còn là RC), #16 (`Access is denied` trong `target/`), #17 (test binary của `muster-app` không nạp được). Nghiệm thu M0 đã đạt trên thư mục RAM giả lập: 2 tài khoản, file gốc không đổi hash. |
+Tài liệu này được viết và rà soát trong ngày 2026-10-10, song song với việc hoàn tất M0. Mọi con
+số kỹ thuật ở mục 4 (Argon2, layout file, entropy, tên khoá) đã được xác minh trực tiếp từ
+`RAM_Source/`; bằng chứng tái lập được nằm ở `tools/fixtures-gen/provenance/`.
+
+Ba điểm từng ghi **sai** ở bản đầu và đã được sửa — nêu lại để người đọc bản cũ không nhầm:
+(1) 16 byte MAC của secretbox nằm ở **đầu** phần sau nonce, không phải ở cuối;
+(2) nhánh DPAPI CurrentUser và LocalMachine **không tách được** khi đọc;
+(3) khoá thật là `ShuffleJobId`, và `RAMSettings.ini` có khoảng 40 khoá chứ không phải 16.
+
+Từ đây, lịch sử thay đổi chi tiết nằm ở `git log` — không chép lại vào tài liệu này nữa.
 
 ---
 
-## 12. Chiến lược tên tạm (quyết định 2026-10-10)
+## 12. Đổi tên dự án (quyết định 2026-10-10)
 
-Tên dự án **vẫn chưa chốt**, nhưng **không được phép chặn công việc**. Quyết định:
+Tên dự án **chưa chốt**, nhưng không được phép chặn công việc. Toàn repo dùng codename tạm
+**`Muster`** (`muster` cho crate/bundle id, `Muster.exe` cho file thực thi) — không còn placeholder.
 
-1. Dùng **`muster`** làm codename tạm (đã là ví dụ trong tài liệu này, nên không phát sinh thêm khái niệm).
-   Mọi nơi dùng placeholder `<PROJECT>` / `<project>` / `<slug>` / `<BINARY>` như mục 1.
-2. **Đổi tên phải là thao tác một lệnh.** Tạo `tools/rename.sh` (hoặc `cargo xtask rename`) làm đúng việc:
-   - đổi tên thư mục crate + `name` trong mọi `Cargo.toml`;
-   - đổi `identifier` trong `tauri.conf.json` (`dev.<slug>.app`);
-   - đổi tên file `.exe` mong muốn trong `tauri.conf.json` (`productName`);
-   - thay toàn bộ `<PROJECT>`/`<project>`/`<slug>`/`<BINARY>` trong `*.md`, `*.rs`, `*.ts`, `*.json`;
-   - **không** sửa `RAM_Source/` (đó là nguồn tham chiếu bất biến).
-3. Điều kiện "xong" của một lần đổi tên: `cargo build --workspace` + `cargo test` + `tsc --noEmit` vẫn xanh
-   sau khi chạy script, và `git diff` không chạm `RAM_Source/`.
+**Đổi tên phải là thao tác một lệnh.** `tools/rename.sh <TenMoi>` làm đúng việc:
 
-Nhờ vậy việc chọn tên trở thành một thao tác rẻ, có thể làm ở bất kỳ thời điểm nào — kể cả sau M2.
+- thay tên hiển thị, tên viết hoa và codename ở mọi file văn bản (`*.md`, `*.rs`, `*.ts`, `*.json`,
+  `*.py`, `*.sh`, `*.toml`, …), trừ `RAM_Source/`, `target/`, `node_modules/`, `.workbuddy-ai/`;
+- đổi tên thư mục crate `crates/muster-*` → `crates/<codename>-*`;
+- cập nhật `[workspace.metadata.project]` trong `Cargo.toml` và `identifier` / `productName` trong
+  `tauri.conf.json`;
+- sinh lại `Cargo.lock` và làm mới `package-lock.json`.
 
-**Giới hạn đã biết của script** (gặp thật 2026-10-10 khi kiểm chứng): phép thay thế là thay chuỗi
-thuần, nên **câu văn có chứa cả tên cũ lẫn tên mới sẽ bị làm hỏng**. Ví dụ một câu viết
-"đổi sang tên khác rồi khôi phục" thì không sao, nhưng câu dạng "A → B → kiểm tra" sẽ bị đổi
-thành "A → A" sau một vòng đổi đi rồi đổi lại. Vì vậy: **sau khi đổi tên, luôn đọc lại
-`ROADMAP.md` mục 6.0 và 12 để sửa tay những câu như vậy.** Script đã in cảnh báo này ở bước cuối.
+Điều kiện "xong": `cargo fmt --check`, `cargo test`, `cargo check --workspace`, `tsc --noEmit` vẫn
+xanh, và `git diff` không chạm `RAM_Source/`. Script tự chạy 4 bước kiểm này ở bước cuối.
+
+**Giới hạn đã biết:** phép thay thế là thay chuỗi thuần, nên câu văn chứa cả tên cũ lẫn tên mới sẽ
+bị làm hỏng (ví dụ câu dạng "A → B → kiểm tra" thành "A → A" sau hai vòng đổi). Sau khi đổi tên,
+đọc lại những câu như vậy trong `ROADMAP.md`. Script in cảnh báo này ở bước cuối.

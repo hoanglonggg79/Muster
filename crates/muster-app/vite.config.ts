@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Cau hinh Vite cho <PROJECT>.
+// Cau hinh Vite cho Muster.
 // Cong 1420 phai khop `build.devUrl` trong crates/muster-app/src-tauri/tauri.conf.json.
 export default defineConfig({
   plugins: [react()],

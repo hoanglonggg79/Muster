@@ -1,4 +1,4 @@
-<PROJECT> — Trình duyệt & luồng đăng nhập
+Muster — Trình duyệt & luồng đăng nhập
 ================================================================================
 
 Trạng thái: **ĐÃ CHỐT** ngày 2026-10-10. Thay thế mọi mô tả mơ hồ trước đó về "port AccountBrowser".
@@ -19,7 +19,7 @@ Chỉ có duy nhất một chỗ nhắc `auth.roblox.com/v2/login` — `AccountB
 chữ được gõ sẵn vào form của trình duyệt; hàm nhập hàng loạt
 (`AccountManager.cs:1396-1417`) mở **một cửa sổ Chromium cho mỗi dòng**.
 
-`<PROJECT>` làm khác: đường API là đường chính, trình duyệt là đường dự phòng.
+`Muster` làm khác: đường API là đường chính, trình duyệt là đường dự phòng.
 
 --------------------------------------------------------------------------------
 ## 2. Ba tầng, thử từ trên xuống
@@ -35,7 +35,7 @@ rồi kết nối qua CDP.
 ```
 msedge.exe  (hoặc chrome.exe)
   --remote-debugging-port=0          # tự chọn cổng, ghi vào DevToolsActivePort
-  --user-data-dir=%LOCALAPPDATA%\<PROJECT>\browser-profile\<session-id>
+  --user-data-dir=%LOCALAPPDATA%\muster\browser-profile\<session-id>
   --no-first-run --no-default-browser-check
 ```
 
@@ -163,9 +163,9 @@ vì đây là thứ dễ sai và sai thì lỗi trả về sẽ rất mơ hồ.
 --------------------------------------------------------------------------------
 ## 5. Những thứ KHÔNG copy từ RAM
 
-RAM bật sẵn một số thứ mà `<PROJECT>` cố tình không làm. Ghi lại để không ai vô tình port sang.
+RAM bật sẵn một số thứ mà `Muster` cố tình không làm. Ghi lại để không ai vô tình port sang.
 
-| RAM làm | `<PROJECT>` làm | Lý do |
+| RAM làm | `Muster` làm | Lý do |
 | :--- | :--- | :--- |
 | `--disable-web-security` mặc định (`AccountBrowser.cs:64`) | **Không bao giờ** bật mặc định | Tắt same-origin policy. Chỉ bật trong tính năng "URL + JS tuỳ chỉnh" sau Developer Mode, kèm cảnh báo |
 | `StealthPlugin` (PuppeteerExtraSharp) để né phát hiện bot | Không dùng mặc định | Né phát hiện là cuộc chiến không hồi kết, và là rủi ro ToS |
@@ -178,7 +178,7 @@ RAM bật sẵn một số thứ mà `<PROJECT>` cố tình không làm. Ghi l�
 ## 6. Vị trí trên đĩa
 
 ```
-%LOCALAPPDATA%\<PROJECT>\
+%LOCALAPPDATA%\muster\
 ├─ browser\
 │  └─ chrome-for-testing\<version>\      # giải nén ở đây, giữ được nhiều version
 └─ browser-profile\

@@ -1,4 +1,4 @@
-//! # `<project>` — giao diện dòng lệnh
+//! # `muster` — giao diện dòng lệnh
 //!
 //! Chạy headless, không cần GUI. Đây là công cụ để kiểm chứng `muster-core` mà không phải
 //! khởi động Tauri (nguyên tắc bất biến #3 trong `ROADMAP.md`).
@@ -20,7 +20,7 @@ use muster_core::vault::{self, Branch};
 #[command(
     name = "muster-cli",
     version,
-    about = "Headless interface for <PROJECT>",
+    about = "Headless interface for Muster",
     long_about = None
 )]
 struct Cli {
