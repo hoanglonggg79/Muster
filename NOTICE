@@ -1,0 +1,52 @@
+<PROJECT> — account manager for Roblox
+Copyright (C) 2026 <PROJECT> contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+================================================================================
+Phan phai sinh — ghi cong tac gia goc
+================================================================================
+
+<PROJECT> la ban phai sinh (derivative work) tu:
+
+    Roblox Account Manager
+    Truoc do: RBX Alt Manager
+    Tac gia: ic3w0lf22
+    Nguon:  https://github.com/ic3w0lf22/Roblox-Account-Manager
+    Giay phep: GNU General Public License v3.0
+
+Toan bo thu muc RAM_Source/ trong repo nay la ban sao nguyen trang cua tac pham tren, duoc giu lai
+lam nguon tham chieu cho viec tai lap hanh vi tuong thich. Phan code Rust trong crates/ duoc viet
+moi, nhung tai lap dac ta hanh vi, dinh dang file, giao thuc va giao dien API cua tac pham goc.
+
+Theo giay phep GPL-3.0, <PROJECT> cung duoc phat hanh duoi GPL-3.0. Xem LICENSE.
+
+================================================================================
+Nhung thu KHONG duoc phat hanh kem
+================================================================================
+
+- handle.exe (Sysinternals, Microsoft). Co dieu khoan cap phep rieng, khong duoc redistribute.
+  RAM_Source/ co chua file nay chi vi do la ban sao nguyen trang cua nguon tham chieu.
+  <PROJECT> KHONG dung handle.exe — xem ROADMAP.md muc M3.
+- CefSharp / CEF va cac ban Chromium tai ve: khong nhung san, chi tai khi nguoi dung yeu cau.
+  Xem docs/BROWSER.md.
+
+================================================================================
+Thuong hieu
+================================================================================
+
+"Roblox" la thuong hieu cua Roblox Corporation. Du an nay khong lien ket, khong duoc tai tro va
+khong duoc Roblox Corporation chung thuc. Ten "Roblox" khong xuat hien trong ten san pham, ten
+crate, bundle identifier hay ten mien cua <PROJECT> — chi dung trong van ban mo ta de noi ro
+san pham dung de lam gi.

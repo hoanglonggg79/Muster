@@ -1,0 +1,20 @@
+[package]
+name = "muster-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Headless command line interface for <PROJECT>."
+
+[[bin]]
+name = "muster-cli"
+path = "src/main.rs"
+
+[dependencies]
+muster-core.workspace = true
+muster-api.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

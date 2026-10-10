@@ -1,0 +1,39 @@
+[package]
+name = "muster-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tauri 2 desktop shell for <PROJECT>. Contains only command wrappers — all logic lives in muster-core."
+
+[lib]
+name = "muster_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+muster-core.workspace = true
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+
+# ---------------------------------------------------------------------------------------------
+# BAT BUOC — khong phai phu thuoc that su duoc dung. KHONG XOA.
+#
+# indexmap 1.9.3 khong dat feature `std` vao `default`, va build.rs cua no chi phat
+# `cargo:rustc-cfg=has_std` khi thay bien CARGO_FEATURE_STD; neu khong no pho mac cho autocfg
+# tu do. Khi do `IndexMap<K, V, S>` mat tham so mac dinh, va schemars 0.8.22 (do tauri-utils keo
+# vao voi feature `preserve_order`) khai bao `pub type Map<K, V> = indexmap::IndexMap<K, V>;`
+# -> E0107, hong ca workspace.
+#
+# Bat `std` tuong minh se dat CARGO_FEATURE_STD, buoc build.rs phat has_std, va loi bien mat.
+# Can khai o CA HAI bang vi resolver khong hop nhat feature giua build-dependency va
+# dependency thuong ke tu resolver v2.
+#
+# Kiem chung: cargo check --workspace.  Go duoc khi indexmap 1.x len ban moi hoac Tauri bo
+# schemars 0.8.
+# ---------------------------------------------------------------------------------------------
+indexmap = { version = "1.9", features = ["std"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+indexmap = { version = "1.9", features = ["std"] }

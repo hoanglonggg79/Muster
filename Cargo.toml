@@ -1,0 +1,61 @@
+# Workspace root — <PROJECT>
+#
+# Tên dự án CHƯA CHỐT. Codename tạm nằm ở [workspace.metadata.project] bên dưới.
+# Đổi tên bằng một lệnh:  tools/rename.sh <TenMoi>
+# Xem ROADMAP.md mục 12.
+
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/muster-core",
+    "crates/muster-api",
+    "crates/muster-cli",
+    "crates/muster-app/src-tauri",
+]
+
+# `cargo check` / `cargo test` không tham số chỉ chạy 3 crate nhẹ.
+# Crate Tauri kéo theo rất nhiều phụ thuộc -> chỉ build khi gọi `--workspace`
+# hoặc khi làm việc với UI. CI luôn dùng `--workspace`.
+default-members = [
+    "crates/muster-core",
+    "crates/muster-api",
+    "crates/muster-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+description = "Account manager for Roblox"
+repository = "https://github.com/CHANGE-ME/muster"
+
+[workspace.dependencies]
+muster-core = { path = "crates/muster-core" }
+muster-api = { path = "crates/muster-api" }
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["trace"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+# Nguồn duy nhất cho tên dự án. tools/rename.sh đọc và cập nhật hai giá trị này.
+# display : tên hiển thị (UI, tiêu đề cửa sổ, tài liệu). KHÔNG chứa chữ "Roblox".
+# codename: tên crate/package (kebab-case, chữ thường), cũng dùng làm slug + bundle id.
+[workspace.metadata.project]
+display = "Muster"
+codename = "muster"

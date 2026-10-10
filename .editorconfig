@@ -1,0 +1,28 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.rs]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{toml,json,yaml,yml}]
+indent_style = space
+indent_size = 2
+
+[*.{ts,tsx,js,jsx,css,html}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Nguồn tham chiếu của RAM — không bao giờ định dạng lại
+[RAM_Source/**]
+insert_final_newline = false
+trim_trailing_whitespace = false

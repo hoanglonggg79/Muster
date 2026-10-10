@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------- Rust
+target/
+**/target/
+
+# ---------------------------------------------------------------- Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# ---------------------------------------------------------------- Tauri
+crates/muster-app/src-tauri/gen/
+crates/muster-app/src-tauri/target/
+
+# ---------------------------------------------------------------- IDE / editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# ---------------------------------------------------------------- OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------------------------------------------------------------- Build artifacts
+*.pdb
+*.ilk
+
+# ---------------------------------------------------------------- Local scratch
+/tmp/
+
+# ---------------------------------------------------------------- WorkBuddy agent state
+# Trang thai cua agent (memory, phien lam viec). Khong phai cache — KHONG xoa thu muc nay,
+# nhung cung khong commit: no thay doi lien tuc va la du lieu cuc bo theo tung may.
+.workbuddy-ai/

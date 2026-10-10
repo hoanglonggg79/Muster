@@ -1,0 +1,28 @@
+# Chuẩn hoá line ending cho toàn repo.
+#
+# Vì sao cần: máy Windows mặc định đặt core.autocrlf=true, nghĩa là mọi file text sẽ bị
+# checkout ra CRLF. Điều đó làm hỏng tools/rename.sh (shebang `#!/usr/bin/env bash\r` không
+# chạy được trong Git Bash) và gây diff nhiễu mỗi lần đổi máy.
+#
+# Quy tắc: mọi file text dùng LF, kể cả trên Windows. File nhị phân khai báo tường minh.
+
+* text=auto eol=lf
+
+# ------------------------------------------------------------------ nhị phân
+*.png  binary
+*.ico  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.bin  binary
+*.pyd  binary
+*.dll  binary
+*.exe  binary
+*.so   binary
+*.dylib binary
+*.zip  binary
+
+# ------------------------------------------------------------------ không diff
+Cargo.lock      -diff linguist-generated
+package-lock.json -diff linguist-generated

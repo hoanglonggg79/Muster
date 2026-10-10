@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Quyen mac dinh cho cua so chinh. Chi mo nhung gi that su can thiet.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

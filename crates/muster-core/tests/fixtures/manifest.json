@@ -1,0 +1,50 @@
+{
+  "generated_by": "tools/fixtures-gen/generate.py",
+  "note": "Du lieu tong hop, da khu dinh danh. Khong chua cookie that.",
+  "verified_params": {
+    "kdf": "Argon2i v1.3",
+    "t_cost": 6,
+    "m_cost_kib": 131072,
+    "p_cost": 1,
+    "out_len": 32,
+    "kdf_input": "SHA-512(password)",
+    "salt_len": 16,
+    "nonce_len": 24,
+    "ram_header_len": 64
+  },
+  "fixtures": [
+    {
+      "file": "accountdata.plain.json",
+      "branch": 4,
+      "kind": "plain-json",
+      "detect": "byte dau tien la '['",
+      "password": null
+    },
+    {
+      "file": "accountdata.password-locked.bin",
+      "branch": 1,
+      "kind": "password-locked",
+      "detect": "64 byte dau khop RAMHeader",
+      "password": "ram-fixture-password",
+      "salt_hex": "b3ff640144537f27a98126486e3f8b03",
+      "nonce_hex": "ef5df07c78447e5fc48390497385943eadde98998b592555",
+      "size": 978
+    },
+    {
+      "file": "accountdata.dpapi-currentuser.bin",
+      "branch": 2,
+      "kind": "dpapi",
+      "scope": "CurrentUser",
+      "entropy_ascii": "ROBLOX ACCOUNT MANAGER | :) | BROUGHT TO YOU BUY ic3w0lf",
+      "size": 1078
+    },
+    {
+      "file": "accountdata.dpapi-localmachine.bin",
+      "branch": 3,
+      "kind": "dpapi",
+      "scope": "LocalMachine",
+      "entropy_ascii": "ROBLOX ACCOUNT MANAGER | :) | BROUGHT TO YOU BUY ic3w0lf",
+      "size": 1078
+    }
+  ]
+}
