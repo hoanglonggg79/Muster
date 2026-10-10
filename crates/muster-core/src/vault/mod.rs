@@ -98,7 +98,7 @@ const _: () = assert!(DPAPI_ENTROPY.len() == 56);
 const _: () = assert!(CIPHERTEXT_OFFSET == 104);
 
 /// Nhánh định dạng **đoán được** chỉ từ phần mở đầu của file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum Branch {
     /// 64 byte đầu khớp [`RAM_HEADER`].

@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codegen": "cargo test --manifest-path ../../Cargo.toml -p muster-app -- --ignored regenerate_bindings"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.2",

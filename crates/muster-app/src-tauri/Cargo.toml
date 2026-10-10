@@ -10,11 +10,28 @@ description = "Tauri 2 desktop shell for <PROJECT>. Contains only command wrappe
 name = "muster_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "muster-app"
+path = "src/main.rs"
+
+# Sinh bindings TypeScript. Tách thành binary riêng thay vì làm trong một test: test binary của
+# crate này không nạp được trên Windows (xem rủi ro #17 trong ROADMAP.md).
+[[bin]]
+name = "muster-codegen"
+path = "src/bin/codegen.rs"
+
 [dependencies]
-muster-core.workspace = true
+# `features = ["specta"]` bật derive specta::Type cho Account/Branch/Format — đây là hợp đồng
+# type giữa nhánh Rust và nhánh UI (ROADMAP mục 6.0-UI).
+muster-core = { workspace = true, features = ["specta"] }
 tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
+
+# Sinh bindings TypeScript. Cả ba đều GHIM ĐÚNG BẢN rc — tauri-specta v2 chưa stable.
+specta.workspace = true
+tauri-specta.workspace = true
+specta-typescript.workspace = true
 
 # ---------------------------------------------------------------------------------------------
 # BAT BUOC — khong phai phu thuoc that su duoc dung. KHONG XOA.

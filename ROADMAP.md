@@ -162,14 +162,37 @@ RAM có **4 nhánh định dạng**. Trình nhập của `<PROJECT>` phải nh�
 | 3 | **DPAPI — LocalMachine** | Như trên nhưng scope khác | `CryptUnprotectData` scope **LocalMachine**, cùng entropy |
 | 4 | **Plain JSON** | Byte đầu là `[` | Đọc trực tiếp UTF-8 |
 
+> ⚠️ **ĐÃ ĐO 2026-10-10 — nhánh 2 và 3 KHÔNG tách được khi đọc.** Chiến lược "thử CurrentUser
+> trước, thất bại thì thử LocalMachine" vẫn đúng và vẫn phải làm, vì nó tối đa hoá khả năng mở
+> được file. Nhưng **kết quả thử không cho biết phạm vi thật**: đo trên Windows cho thấy một blob
+> được mã hoá bằng phạm vi **LocalMachine** vẫn giải mã thành công bằng đường **CurrentUser**
+> (không kèm cờ `CRYPTPROTECT_LOCAL_MACHINE`). Cả hai fixture DPAPI trong `tests/fixtures/` đều
+> mở được bằng cả hai chế độ cờ.
+>
+> Hệ quả cho code: `core::vault::Format` chỉ có **một** biến thể `Dpapi` thay vì hai, và báo cáo
+> nhập ghi `dpapi`. Thà báo ít thông tin còn hơn khẳng định một phạm vi mà mình không biết chắc.
+> Việc **ghi** thì vẫn chọn được phạm vi — `vault::seal_dpapi(plaintext, scope)`.
+>
+> Trường hợp ngoại lệ duy nhất đáng ghi nhận: nếu đường không cờ thất bại mà đường có cờ thành
+> công thì chắc chắn là blob phạm vi máy — nhưng trường hợp đó hiếm và không đủ để đổi hình dạng
+> của kiểu công khai.
+
 **Chi tiết nhánh 1 — layout nhị phân:**
 
 ```
 offset 0    : 64 byte   magic RAMHeader (ASCII, xem 4.2)
 offset 64   : 16 byte   salt        (ArgonGenerateSalt)
 offset 80   : 24 byte   nonce       (SecretBox.GenerateNonce)
-offset 104  : phần còn lại  ciphertext (secretbox, gồm 16 byte MAC ở cuối)
+offset 104  : 16 byte   MAC         (crypto_secretbox_MACBYTES)
+offset 120  : phần còn lại  ciphertext
 ```
+
+> ⚠️ **ĐÃ SỬA 2026-10-10 — bản đầu của tài liệu ghi sai vị trí MAC.** Bản đầu viết
+> "offset 104 : ciphertext (secretbox, gồm 16 byte MAC ở cuối)". **Sai.** `Sodium.SecretBox.Encrypt`
+> gọi `crypto_secretbox_easy`, và hàm này đặt 16 byte MAC ở **đầu** phần sau nonce, không phải ở
+> cuối. Đã kiểm chứng lại trên chính fixture `accountdata.password-locked.bin`: mở được khi coi
+> `blob[..16]` là MAC, và không mở được khi coi `blob[-16..]` là MAC. Kích thước tối thiểu của
+> một file nhánh 1 vì vậy là **120 byte**, không phải 104.
 
 - Hàm dẫn xuất khoá: `PasswordHash.ArgonHashBinary(SHA512(password), salt, StrengthArgon.Moderate, 32)`
 - ⚠️ **Lưu ý quan trọng:** đầu vào của Argon2 KHÔNG phải password thô mà là `CryptoHash.Hash(password)`
@@ -318,12 +341,23 @@ Ngoài 22 route: giữ thêm `/Running` và `/favicon.ico`.
 
 ### 4.4 Định dạng cấu hình `RAMSettings.ini`
 
-- [ ] Viết migration đọc INI cũ → config mới (`toml`), giữ nguyên giá trị, không hỏi lại người dùng.
-- [ ] Giữ nguyên tên khoá để người dùng có thể tự sửa file nếu muốn: `WebServerPort`, `NexusPort`,
-      `EnableMultiRbx`, `SavePasswords`, `AllowExternalConnections`, `EveryRequestRequiresPassword`,
-      `AllowGetAccounts`, `AllowGetCookie`, `AllowLaunchAccount`, `ShuffleJobID`, `AutoCloseLastProcess`,
-      `UnlockFPS`, `MaxFPSValue`, `CustomClientSettings`, `ScaleFonts`, `DevMode`.
-- [ ] File `RAMSettings.ini` gốc phải được sao lưu, không xoá.
+- [x] ~~Viết migration đọc INI cũ → config mới (`toml`), giữ nguyên giá trị, không hỏi lại người dùng.~~
+      **XONG 2026-10-10** — `core::settings`, xem ghi chú bên dưới.
+- [x] ~~Giữ nguyên tên khoá để người dùng có thể tự sửa file nếu muốn~~ **XONG 2026-10-10**.
+      Danh sách dưới đây là 16 khoá mà bản đầu của tài liệu liệt kê:
+      `WebServerPort`, `NexusPort`, `EnableMultiRbx`, `SavePasswords`, `AllowExternalConnections`,
+      `EveryRequestRequiresPassword`, `AllowGetAccounts`, `AllowGetCookie`, `AllowLaunchAccount`,
+      `ShuffleJobID`, `AutoCloseLastProcess`, `UnlockFPS`, `MaxFPSValue`, `CustomClientSettings`,
+      `ScaleFonts`, `DevMode`.
+      ⚠️ **Hai điểm đã sửa khi đối chiếu `RAM_Source/`:**
+      1. **Khoá thật là `ShuffleJobId`, không phải `ShuffleJobID`.** `AccountManager.cs:2079` ghi ra
+         chữ `d` thường. Bản port ghi ra `ShuffleJobId` và khi đọc chấp nhận cả hai cách viết.
+      2. **Danh sách thật nhiều hơn 16 khoá.** `AccountManager.cs:121-165` đặt mặc định cho khoảng
+         40 khoá trải trên 6 section (`General`, `Developer`, `WebServer`, `AccountControl`,
+         `Watcher`, `Prompts`). Migration đọc hết, và mọi khoá/section không mô hình hoá được vẫn
+         giữ nguyên trong catch-all nên không mất dữ liệu.
+- [x] ~~File `RAMSettings.ini` gốc phải được sao lưu, không xoá.~~ **XONG 2026-10-10** —
+      `settings::backup_file()` ghi bản sao `<tên>.backup-<unix_giây>` trước khi ghi bất cứ thứ gì.
 
 ---
 
@@ -402,19 +436,25 @@ của code. Nguyên tắc: giết rủi ro chưa biết trước khi viết code
 | ~~**0.1**~~ ✅ | ~~Sinh test vector vault thật (1 file mỗi nhánh, đã khử định danh)~~ **XONG 2026-10-10** | Là *hợp đồng* cho toàn bộ `core::vault`. Không có nó thì mọi dòng code vault chỉ là phỏng đoán | — |
 | ~~**0.2**~~ ✅ | ~~Chốt ánh xạ `StrengthArgon.Moderate` → `(t, m, p)`~~ **XONG 2026-10-10** → `t=6, m=131072 KiB, p=1` | Rủi ro #6. Biết Argon2i rồi vẫn phải biết `t_cost` | 0.1 |
 | ~~**0.3**~~ ✅ | ~~Scaffold workspace 4 crate + `tools/rename.sh`~~ **XONG 2026-10-10** | Sau 0.2 vì tên crate phụ thuộc tên dự án, và ta muốn rename được | 0.2 (mềm) |
-| 🔶 **0.4** | `core::vault` + test vector chạy xanh — **đang làm**: hằng số đã xác minh + `detect_branch()` + 5 unit test đã xong; còn thiếu toàn bộ phần mã hoá/giải mã | Lúc này mới có cơ sở để viết code | 0.1, 0.2, 0.3 |
-| **0.5** | `tauri-specta` + 1 command thử `vault::inspect` xuyên từ React | Chứng minh đường IPC có kiểu thông suốt trước khi xây UI thật | 0.3 |
-| **0.6** | `core::settings` + migration `RAMSettings.ini` → TOML | Độc lập, rủi ro thấp, làm khi rảnh | 0.3 |
+| ~~**0.4**~~ ✅ | ~~`core::vault` + test vector chạy xanh~~ **XONG 2026-10-10** — 58 unit test + 11 test tích hợp, cả 4 fixture giải mã ra dữ liệu giống hệt nhau | Lúc này mới có cơ sở để viết code | 0.1, 0.2, 0.3 |
+| ~~**0.5**~~ ✅ | ~~`tauri-specta` + command xuyên từ React~~ **XONG 2026-10-10** — bindings sinh tự động vào `crates/muster-app/src/bindings.ts`, `tsc --noEmit` xanh | Chứng minh đường IPC có kiểu thông suốt trước khi xây UI thật | 0.3 |
+| ~~**0.6**~~ ✅ | ~~`core::settings` + migration `RAMSettings.ini` → TOML~~ **XONG 2026-10-10** — 6 section, ~40 khoá, giữ nguyên tên khoá của RAM | Độc lập, rủi ro thấp, làm khi rảnh | 0.3 |
 | **0.7** | Wizard nhập liệu + backup ZIP + báo cáo | Cần 0.4 xong | 0.4 |
 | **0.8** | `tracing` + redaction test + CI | Chốt chặn chất lượng, phải có trước khi có gì đáng giữ | 0.3 |
 
-**Trạng thái 2026-10-10:** 0.1, 0.2, 0.3 đã xong. **0.4 đang làm dở** — phần nhận diện định dạng
-đã xong, phần mã hoá/giải mã chưa có. Workspace build được cả 4 crate (`cargo check --workspace` xanh),
-`cargo test` xanh, `tsc --noEmit` xanh, frontend build ra `dist/`. `tools/rename.sh` đã được kiểm chứng
-bằng một vòng đổi tên thật trên bản sao (đổi sang tên khác rồi khôi phục, cả hai chiều đều xanh).
+**Trạng thái 2026-10-10:** 0.1, 0.2, 0.3, **0.4**, **0.5**, **0.6** đã xong. Việc tiếp theo là
+**0.7** (wizard nhập liệu) và **0.8** (tracing + CI).
+Workspace build được cả 4 crate (`cargo check --workspace` xanh), `cargo test` xanh,
+`tsc --noEmit` xanh, frontend build ra `dist/`. `tools/rename.sh` đã được kiểm chứng bằng một vòng
+đổi tên thật trên bản sao (đổi sang tên khác rồi khôi phục, cả hai chiều đều xanh).
 
-**Baseline git:** repo đã `git init` nhưng tới 2026-10-10 vẫn **chưa có commit nào**. Đã chốt baseline
-ở lần làm việc này; từ đây mỗi bước xong phải có commit riêng.
+**Baseline git:** repo đã `git init` nhưng tới 2026-10-10 vẫn **chưa có commit nào**. Đã chốt
+baseline ở lần làm việc này; từ đây mỗi bước xong phải có commit riêng.
+
+**Hợp đồng hai nhánh đã có thật:** `crates/muster-app/src/bindings.ts` được sinh từ code Rust và
+đã chứa `Account`, `Branch`, `Format`, cùng hai command `vaultInspect` / `vaultOpen`. Nhánh UI từ
+đây **được phép** bắt đầu dựng component bằng dữ liệu giả dựa trên type đó — nhưng vẫn chưa được
+ghép dữ liệu thật cho tới khi M1 có model `Account` đầy đủ.
 
 ---
 
@@ -438,6 +478,21 @@ toàn bộ phần ghép phải viết lại. Cách chặn: chốt trước hình
 `Fields`, `Group`, `BrowserTrackerID`), `Server`, `GameInstance` — rồi để `tauri-specta` sinh
 type cho UI dùng. Đây chính là lý do bước **0.5 có giá trị cao hơn vẻ ngoài của nó**: nó không
 chỉ là "cho đẹp kiến trúc", nó là **hợp đồng giữa hai nhánh**.
+
+**Trạng thái 2026-10-10 — hợp đồng đã có thật.** `crates/muster-app/src/bindings.ts` được sinh từ
+code Rust và hiện chứa: `Account` (kèm `Account_Serialize` / `Account_Deserialize`), `Branch`,
+`Format`, `VaultInspection`, `VaultOpenSummary`, và hai command `vaultInspect` / `vaultOpen`.
+Sinh lại bằng `npm run codegen`.
+
+Hệ quả cho nhánh UI:
+
+- **Được phép** bắt đầu dựng component bằng dữ liệu giả dựa trên `Account` trong bindings — đây
+  chính là thứ mà trước 0.5 chưa có nên nhánh UI bị chặn.
+- **Chưa được** ghép dữ liệu thật cho tới khi M1 có CRUD account; hiện chỉ có hai command đọc file.
+- Cần thêm field vào `Account` hoặc thêm command mới → báo nhánh Rust trước, rồi chạy
+  `npm run codegen`. **Đừng sửa `bindings.ts` bằng tay** — file đó bị ghi đè mỗi lần chạy codegen.
+- `Account::extra` (túi field lạ) cố tình **không** xuất sang TypeScript: UI không thể và không nên
+  dùng dữ liệu chưa biết hình dạng. Nó vẫn được giữ nguyên khi ghi lại xuống đĩa.
 
 **Bối cảnh đã chốt 2026-10-10:** UI dev làm **trong repo này**, tại `crates/muster-app/src/`,
 dùng **stack theo mục 3.3**.
@@ -470,10 +525,17 @@ chỉ bổ sung phần *thiết kế và hạ tầng*, thứ mà M1–M3 không 
 
 - [x] ~~Scaffold Cargo workspace 4 crate + frontend Vite/React/TS (M)~~ — **XONG 2026-10-10**:
       `cargo check --workspace` xanh, `cargo test` xanh, `tsc --noEmit` xanh, `tools/rename.sh` xong.
-- [ ] Cấu hình `tauri-specta` sinh type TypeScript từ command Rust (M)
-      — ⚠️ **chặn nhánh UI**, xem mục 6.0-UI
-- [ ] `core::settings`: model config + đọc `RAMSettings.ini` cũ, migration sang TOML (M)
-- [ ] `core::vault`: 4 nhánh giải mã ở mục 4.1 + API ghi lại (L)
+- [x] ~~Cấu hình `tauri-specta` sinh type TypeScript từ command Rust (M)~~
+      — **XONG 2026-10-10**: `muster-app/src-tauri/src/lib.rs` dựng `Builder`, hai command
+      `vault_inspect` / `vault_open`, bindings ghi ra `crates/muster-app/src/bindings.ts`.
+      Sinh lại bằng `npm run codegen`. Xem rủi ro #17 về việc crate này không chạy được `cargo test`.
+- [x] ~~`core::settings`: model config + đọc `RAMSettings.ini` cũ, migration sang TOML (M)~~
+      — **XONG 2026-10-10**: `core::settings` + `core::settings::ini`, giữ nguyên tên section và
+      tên khoá của RAM, catch-all nên không mất khoá lạ, `backup_file()` sao lưu file gốc.
+- [x] ~~`core::vault`: 4 nhánh giải mã ở mục 4.1 + API ghi lại (L)~~ — **XONG 2026-10-10**:
+      `derive_key` (SHA-512 → Argon2i), `open_password_locked`/`seal_password_locked`,
+      `vault::dpapi`, `open()` tự dò nhánh, `read_accounts`/`accounts_to_bytes`.
+      Kèm `core::models::Account` khớp từng field với `Classes/Account.cs`.
 - [x] ~~Test vector cho cả 4 nhánh vault, kèm fixture đã khử định danh (M)~~ — **XONG 2026-10-10**:
       `crates/muster-core/tests/fixtures/` (4 file + `manifest.json`), sinh bằng
       `tools/fixtures-gen/generate.py`, cả 4 nhánh qua self-check giải mã lại.
@@ -632,6 +694,10 @@ trên Linux trong Docker cho các tác vụ không cần client.
 | 11 | **Xung đột phụ thuộc trong stack Tauri: `schemars 0.8.22` ↔ `indexmap 1.9.3`** | Cao (chặn build) | Đã gặp thật và đã xử lý 2026-10-10. `indexmap 1.9.3` không đưa `std` vào `default` và chỉ phát `has_std` khi có `CARGO_FEATURE_STD`; nếu không nó phó mặc cho autocfg tự dò và việc dò này có thể thất bại → `IndexMap<K, V, S>` mất tham số mặc định → `schemars` (do `tauri-utils` kéo vào với feature `preserve_order`) lỗi E0107. **Đối sách đã áp dụng:** khai `indexmap = { version = "1.9", features = ["std"] }` ở **cả** `[dependencies]` và `[build-dependencies]` của `crates/muster-app/src-tauri/Cargo.toml`, kèm comment giải thích. Đây là bug đã biết của Tauri ([tauri#14928](https://github.com/tauri-apps/tauri/issues/14928)). **Gỡ được** khi indexmap 1.x lên bản mới hoặc Tauri bỏ `schemars 0.8`. Nếu vẫn gặp: `cargo clean` + xoá `~/.cargo/registry/`. |
 | 12 | **`tauri-build` luôn cần `icons/icon.ico`, kể cả khi `bundle.active = false`** | Trung bình | Sinh icon bằng `python tools/gen-icons.py`. Icon hiện tại là placeholder hình học — thay bằng logo thật khi có. |
 | 13 | **Cache incremental hỏng sau khi đổi tên crate — gây ICE và lỗi I/O** | Trung bình | Gặp thật 2026-10-10, **hai triệu chứng khác nhau, cùng một nguyên nhân**: (a) `cargo test` chết với `the compiler unexpectedly panicked` trong `encode_metadata`; (b) `cargo clippy -- -D warnings` báo `error copying object file ... Access is denied. (os error 5)` — một cảnh báo I/O bị `-D warnings` nâng thành lỗi. Cả hai đều **không phải lỗi code**. **Đối sách:** `cargo clean -p <crate>` (đã kiểm chứng chữa được cả hai), hoặc `cargo clean`. `rename.sh` tự gọi `cargo clean -p` cho các crate sau khi đổi tên. |
+| 14 | **`cargo test` chậm gần 200 giây vì Argon2 chạy ở profile `dev`** | Cao (chặn vòng lặp sửa–chạy) | Gặp thật 2026-10-10 khi làm 0.4. Argon2 là hàm nặng tính toán (128 MiB bộ nhớ, 6 vòng); ở `opt-level = 0` nó chậm hơn bản tối ưu khoảng 20 lần — đo được **37,9 giây cho 2 lần dẫn xuất** (~19 s mỗi lần), khiến bộ test vault mất **199 giây**. **Đối sách đã áp dụng:** `[profile.dev.package.argon2\|sha2\|crypto_secretbox\|salsa20\|poly1305] opt-level = 3` trong `Cargo.toml` gốc. `[profile.dev.package.*]` áp cho cả profile `test` vì `test` kế thừa `dev`. Sau khi sửa: **1,94 giây** cho đúng 2 lần dẫn xuất đó. Phần còn lại của workspace vẫn ở `opt-level = 0` nên vòng lặp sửa–chạy không chậm đi. |
+| 15 | **`tauri-specta` v2 vẫn là release candidate** | Trung bình | `tauri-specta 2.0.0-rc.25`, `specta 2.0.0-rc.25`, `specta-typescript 0.0.12`. API còn có thể đổi giữa các bản rc, và **docs.rs không build được cho rc.25** (phải đọc docs của rc.21). **Đối sách:** ghim bằng dấu `=` đúng bản rc.25 trong `[workspace.dependencies]` để `cargo update` không âm thầm phá build. Nếu một ngày buộc phải thay: `ts-rs` là phương án dự phòng cho phần sinh type (nhưng không sinh được wrapper command). |
+| 16 | **`cargo test -p muster-app` chết với `Access is denied` trong `target/debug/build/.../out/`** | Trung bình | Gặp thật 2026-10-10 khi sinh bindings. Cùng họ với rủi ro #13 nhưng ở thư mục output của build script (`tauri::generate_context!` đọc asset từ đó). **Đối sách:** `cargo clean -p muster-app` rồi chạy lại — đã kiểm chứng chữa được. Lưu ý là nó **tái phát** sau vài lần build; nếu gặp lại thì cứ clean, không phải lỗi code. |
+| 17 | **Test binary của `muster-app` không nạp được trên Windows** | Trung bình | `cargo test -p muster-app` sinh ra test binary chết ngay khi nạp: chạy trực tiếp trả mã thoát **127**, cargo báo `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`. Đã loại trừ hai nghi vấn: (a) `crate-type` — bỏ `staticlib`/`cdylib` **không** chữa được; (b) `dbghelp.dll` cũ trên `PATH` — chỉ có bản của System32. So bảng import với test binary của `muster-core` (chạy được) thì phần dư toàn là DLL giao diện do Tauri kéo vào: `comctl32`, `dwmapi`, `gdi32`, `ole32`, `oleaut32`, `shcore`, `shell32`, `user32`, `uxtheme`. **Nghi vấn chính:** test binary không được gắn manifest Common Controls 6.0 như binary ứng dụng (`tauri-build` chỉ gắn cho bin), nên `comctl32.dll` nạp bản v5 vốn thiếu vài export. **Đối sách đã áp dụng:** việc sinh bindings nằm ở binary riêng `muster-codegen` (`cargo run -p muster-app --bin muster-codegen`, hoặc `npm run codegen`), và CI chạy `cargo test --workspace --exclude muster-app`. Việc loại trừ này hợp lý về kiến trúc: nguyên tắc bất biến #3 nói `muster-app` chỉ chứa command wrapper, không có logic gì để test. **Còn tồn:** muốn test thật trong crate này thì phải tìm cách gắn manifest cho test binary. |
 
 ---
 

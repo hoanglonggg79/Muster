@@ -65,6 +65,8 @@ toml = "0.8"
 # Hợp đồng type với nhánh UI (M0 0.5). GHIM ĐÚNG BẢN rc: tauri-specta v2 chưa stable và API
 # có thể đổi giữa các bản rc. Dùng `=` để một lần `cargo update` không âm thầm phá build.
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta-typescript = "0.0.12"
 
 [profile.release]
 codegen-units = 1

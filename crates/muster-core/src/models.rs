@@ -69,7 +69,17 @@ pub struct Account {
     pub group: Option<String>,
 
     /// UserID Roblox. `long` trong C#.
+    ///
+    /// Khai `i64` cho khớp `long` của RAM, nhưng khi xuất sang TypeScript thì khai đè thành
+    /// `number` (qua `f64`): `serde_json` gửi field này qua IPC dưới dạng **số JSON**, nên `number`
+    /// mới là kiểu đúng ở phía nhận. `specta` mặc định từ chối xuất `i64` sang TypeScript vì sợ
+    /// mất chính xác, nên phải khai đè tường minh.
+    ///
+    /// Đánh đổi: `number` của JS chính xác tới 2^53 ≈ 9,0×10^15, còn UserID của Roblox hiện ở mức
+    /// hàng tỉ — cách ngưỡng đó hơn năm bậc độ lớn. Nếu một ngày vượt ngưỡng thì phải đổi cả cách
+    /// serialize lẫn kiểu TypeScript, không chỉ đổi mỗi dòng này.
     #[serde(rename = "UserID", default)]
+    #[cfg_attr(feature = "specta", specta(type = f64))]
     pub user_id: i64,
 
     /// Túi field tuỳ ý. RAM lưu vị trí cửa sổ ở đây
