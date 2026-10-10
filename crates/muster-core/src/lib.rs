@@ -10,14 +10,17 @@
 //!
 //! | Module | Nội dung | Milestone |
 //! | :--- | :--- | :--- |
+//! | [`models`] | [`models::Account`] — hình dạng dữ liệu dùng chung, hợp đồng với nhánh UI | M0 |
 //! | [`vault`] | 4 nhánh định dạng `AccountData.json`, mã hoá/giải mã | M0 |
+//! | [`settings`] | config + migration `RAMSettings.ini` → TOML | M0 |
 //! | `roblox` | `account`, `auth`, `games`, `servers`, `presence`, `batch`, `groups` | M1–M2 |
 //! | `launch` | ticket → join script → spawn, multi-instance | M1 |
 //! | `watcher` | quét process, tail log, regex | M2 |
 //! | `patch` | `ClientAppSettings.json`, FPS unlocker | M1 |
 //! | `nexus` | protocol WebSocket điều khiển client | M2 |
-//! | `settings` | config + migration `RAMSettings.ini` → TOML | M0 |
 //!
 //! Các module chưa làm sẽ được thêm khi tới milestone tương ứng — cố tình không tạo file rỗng.
 
+pub mod models;
+pub mod settings;
 pub mod vault;

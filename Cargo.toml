@@ -46,12 +46,58 @@ clap = { version = "4", features = ["derive"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["trace"] }
 
+# --- vault (M0 0.4) ------------------------------------------------------------------------
+# KDF: Argon2i v1.3 — KHÔNG phải Argon2id. Tham số đã xác minh, xem tools/fixtures-gen/provenance/.
+argon2 = "0.5"
+# Đầu vào của Argon2 là SHA-512(password) 64 byte, không phải password thô.
+sha2 = "0.10"
+# secretbox của libsodium = XSalsa20-Poly1305. KHÔNG dùng chacha20poly1305 (XChaCha20) —
+# đó là thuật toán khác, giải mã sẽ sai 100%.
+crypto_secretbox = "0.1"
+# Xoá khoá dẫn xuất và plaintext khỏi bộ nhớ sau khi dùng (nguyên tắc bất biến #4).
+zeroize = "1"
+# Salt và nonce của nhánh password-locked. Dùng thẳng getrandom thay vì kéo cả crate `rand`
+# vì chỉ cần đúng một việc: đổ đầy một buffer bằng byte ngẫu nhiên của hệ điều hành.
+getrandom = "0.2"
+# Config: migration RAMSettings.ini -> TOML (M0 0.6).
+toml = "0.8"
+
+# Hợp đồng type với nhánh UI (M0 0.5). GHIM ĐÚNG BẢN rc: tauri-specta v2 chưa stable và API
+# có thể đổi giữa các bản rc. Dùng `=` để một lần `cargo update` không âm thầm phá build.
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# ---------------------------------------------------------------------------------------------
+# BẮT BUỘC — không phải để build nhanh hơn, mà để test không mất hàng phút.
+#
+# Argon2 là hàm nặng tính toán: 128 MiB bộ nhớ, 6 vòng, mỗi vòng là hàng trăm nghìn phép toán
+# trên số nguyên 64 bit. Ở profile `dev` (opt-level = 0) nó chạy chậm hơn bản tối ưu khoảng
+# 20 lần — đo thật trên máy này: **37,9 giây cho 2 lần dẫn xuất**, tức ~19 giây mỗi lần.
+# Cả bộ test vault có hơn 20 lần dẫn xuất, nên `cargo test` mất gần 200 giây.
+#
+# `[profile.dev.package.*]` áp cho cả profile `test` (vì `test` kế thừa `dev`). Chỉ tối ưu đúng
+# các crate mật mã, phần còn lại vẫn build ở opt-level 0 nên vòng lặp sửa–chạy vẫn nhanh.
+# ---------------------------------------------------------------------------------------------
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.crypto_secretbox]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.poly1305]
+opt-level = 3
 
 # Nguồn duy nhất cho tên dự án. tools/rename.sh đọc và cập nhật hai giá trị này.
 # display : tên hiển thị (UI, tiêu đề cửa sổ, tài liệu). KHÔNG chứa chữ "Roblox".
