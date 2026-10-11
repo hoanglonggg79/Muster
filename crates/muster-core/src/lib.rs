@@ -29,6 +29,7 @@ pub mod import;
 pub mod launch;
 pub mod logging;
 pub mod models;
+pub mod patch;
 pub mod roblox;
 pub mod settings;
 pub mod vault;
