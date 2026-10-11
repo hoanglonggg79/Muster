@@ -6,6 +6,15 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
 	vaultInspect: (path: string) => typedError<VaultInspection, string>(__TAURI_INVOKE("vault_inspect", { path })),
 	vaultOpen: (path: string, password: string | null) => typedError<VaultOpenSummary, string>(__TAURI_INVOKE("vault_open", { path, password })),
+	accountList: () => typedError<Account_Serialize[], string>(__TAURI_INVOKE("account_list")),
+	accountAddCookie: (cookie: string, alias: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_add_cookie", { cookie, alias })),
+	accountAddCredentials: (username: string, password: string, alias: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_add_credentials", { username, password, alias })),
+	accountRemove: (userId: number | null) => typedError<null, string>(__TAURI_INVOKE("account_remove", { userId })),
+	accountRefresh: (userId: number | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_refresh", { userId })),
+	accountLaunch: (userId: number | null, placeId: number | null, jobId: string | null) => typedError<string, string>(__TAURI_INVOKE("account_launch", { userId, placeId, jobId })),
+	patchApplyFps: (unlockFps: boolean, maxFps: number) => typedError<string, string>(__TAURI_INVOKE("patch_apply_fps", { unlockFps, maxFps })),
+	multiRobloxToggle: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("multi_roblox_toggle", { enabled })),
+	vaultImportRam: (dir: string) => typedError<number, string>(__TAURI_INVOKE("vault_import_ram", { dir })),
 };
 
 /* Types */

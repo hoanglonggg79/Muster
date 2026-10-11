@@ -19,6 +19,9 @@ pub enum LaunchError {
     #[cfg(windows)]
     #[error("không tạo được named mutex {name} (mã lỗi Win32 {code})")]
     Mutex { name: &'static str, code: u32 },
+
+    #[error("khởi chạy URL thất bại (mã lỗi ShellExecute {code})")]
+    ShellExecute { code: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
