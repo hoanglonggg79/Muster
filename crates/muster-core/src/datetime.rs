@@ -68,6 +68,17 @@ pub fn now_json_net() -> String {
     }
 }
 
+/// Số mili giây kể từ Unix epoch, theo giờ hệ thống.
+///
+/// Đây là giá trị RAM nhét vào `launchtime:` của URL `roblox-player:` —
+/// `Account.cs:611`: `Math.Floor((DateTime.UtcNow - epoch).TotalSeconds * 1000)`.
+#[must_use]
+pub fn now_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |delta| delta.as_millis() as u64)
+}
+
 /// Đổi số ngày kể từ 1970-01-01 thành (năm, tháng, ngày).
 ///
 /// Thuật toán `civil_from_days` của Howard Hinnant, đã kiểm chứng bằng các mốc ở phần test.
