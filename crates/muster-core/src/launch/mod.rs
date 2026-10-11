@@ -329,6 +329,87 @@ pub fn url_encode(input: &str) -> String {
     out
 }
 
+/// Khoảng chờ giữa hai lần đóng cửa sổ chính — `Account.cs:537,539`.
+///
+/// RAM đóng cửa sổ chính **hai lần**, cách nhau 250 ms, rồi mới `Kill()`. Lần đóng thứ nhất để
+/// Roblox ngắt kết nối khỏi server (nếu không, lần mở sau bị lỗi *Same account launched*), lần thứ
+/// hai để chắc cửa sổ đã đóng hẳn. Bỏ bước này đi thì việc mở lại cùng tài khoản hay bị chặn.
+pub const CLOSE_WINDOW_DELAY_MS: u64 = 250;
+
+/// Một tiến trình Roblox đang chạy, ở dạng đã rút gọn đủ để ra quyết định.
+///
+/// Kiểu này cố tình **không** chứa handle hay `Process` của hệ điều hành: nhờ vậy toàn bộ phần
+/// quyết định "đóng tiến trình nào, theo thứ tự nào" kiểm thử được mà không cần Roblox thật đang
+/// chạy. Việc liệt kê tiến trình thật là một việc riêng, mỏng.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningClient {
+    /// PID của tiến trình.
+    pub pid: u32,
+    /// Dòng lệnh đầy đủ của tiến trình.
+    pub command_line: String,
+}
+
+impl RunningClient {
+    /// `BrowserTrackerID` của tiến trình, nếu dòng lệnh có cờ `-b`.
+    #[must_use]
+    pub fn browser_tracker_id(&self) -> Option<&str> {
+        parse_browser_tracker_id(&self.command_line)
+    }
+}
+
+/// Lọc ra các client thuộc về một `BrowserTrackerID`.
+///
+/// Tiến trình không có `-b` (ví dụ tiến trình phụ của Roblox) bị bỏ qua — khớp nhầm chúng sẽ làm
+/// client đang chạy bị đá.
+#[must_use]
+pub fn clients_for_tracker<'a>(
+    clients: &'a [RunningClient],
+    tracker: &str,
+) -> Vec<&'a RunningClient> {
+    clients
+        .iter()
+        .filter(|client| client.browser_tracker_id() == Some(tracker))
+        .collect()
+}
+
+/// Các thao tác lên tiến trình mà [`close_previous_instances`] cần.
+///
+/// Tách thành trait để phần trình tự — thứ dễ sai và đáng ghim bằng test — không phụ thuộc vào
+/// Win32.
+pub trait ClientControl {
+    /// Gửi yêu cầu đóng cửa sổ chính (tương đương `Process.CloseMainWindow`). Trả `false` nếu
+    /// không tìm thấy cửa sổ.
+    fn close_main_window(&mut self, pid: u32) -> bool;
+
+    /// Kết thúc tiến trình (tương đương `Process.Kill`). Trả `false` nếu thất bại.
+    fn kill(&mut self, pid: u32) -> bool;
+
+    /// Chờ `millis` mili giây.
+    fn wait(&mut self, millis: u64);
+}
+
+/// Đóng các client cũ của cùng một `BrowserTrackerID`, theo đúng trình tự của RAM
+/// (`Account.cs:523-547`).
+///
+/// Trả về số client đã xử lý. Client không khớp tracker bị bỏ qua hoàn toàn.
+pub fn close_previous_instances<C: ClientControl>(
+    control: &mut C,
+    clients: &[RunningClient],
+    tracker: &str,
+) -> usize {
+    let targets = clients_for_tracker(clients, tracker);
+
+    for client in &targets {
+        control.close_main_window(client.pid);
+        control.wait(CLOSE_WINDOW_DELAY_MS);
+        control.close_main_window(client.pid);
+        control.wait(CLOSE_WINDOW_DELAY_MS);
+        control.kill(client.pid);
+    }
+
+    targets.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,5 +736,107 @@ mod tests {
     fn the_first_valid_tracker_id_wins() {
         let line = "-b 111111111111 -b 222222222222";
         assert_eq!(parse_browser_tracker_id(line), Some("111111111111"));
+    }
+
+    // ---------------------------------------------------------------- auto close last process
+
+    #[derive(Default)]
+    struct RecordingControl {
+        actions: Vec<String>,
+    }
+
+    impl ClientControl for RecordingControl {
+        fn close_main_window(&mut self, pid: u32) -> bool {
+            self.actions.push(format!("close:{pid}"));
+            true
+        }
+
+        fn kill(&mut self, pid: u32) -> bool {
+            self.actions.push(format!("kill:{pid}"));
+            true
+        }
+
+        fn wait(&mut self, millis: u64) {
+            self.actions.push(format!("wait:{millis}"));
+        }
+    }
+
+    fn client(pid: u32, tracker: &str) -> RunningClient {
+        RunningClient {
+            pid,
+            command_line: format!(
+                r#""C:\Roblox\Versions\version-x\RobloxPlayerBeta.exe" -b {tracker} --app"#
+            ),
+        }
+    }
+
+    #[test]
+    fn only_clients_with_the_matching_tracker_are_selected() {
+        let clients = vec![client(1, "111111111111"), client(2, "222222222222")];
+        let selected = clients_for_tracker(&clients, "222222222222");
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].pid, 2);
+    }
+
+    #[test]
+    fn a_client_without_a_tracker_id_is_never_selected() {
+        // Tien trinh phu cua Roblox co dong lenh rong hoac khong co -b.
+        let clients = vec![
+            RunningClient {
+                pid: 7,
+                command_line: String::new(),
+            },
+            RunningClient {
+                pid: 8,
+                command_line: r#"\??\C:\Windows\System32\conhost.exe"#.to_owned(),
+            },
+        ];
+        assert!(clients_for_tracker(&clients, "111111111111").is_empty());
+    }
+
+    #[test]
+    fn closing_follows_the_exact_two_close_one_kill_sequence() {
+        let mut control = RecordingControl::default();
+        let clients = vec![client(42, "123456789012")];
+
+        let closed = close_previous_instances(&mut control, &clients, "123456789012");
+
+        assert_eq!(closed, 1);
+        assert_eq!(
+            control.actions,
+            ["close:42", "wait:250", "close:42", "wait:250", "kill:42"],
+            "trinh tu phai khop Account.cs:537-540"
+        );
+    }
+
+    #[test]
+    fn closing_touches_nothing_when_no_client_matches() {
+        let mut control = RecordingControl::default();
+        let clients = vec![client(1, "111111111111")];
+
+        let closed = close_previous_instances(&mut control, &clients, "999999999999");
+
+        assert_eq!(closed, 0);
+        assert!(
+            control.actions.is_empty(),
+            "khong duoc cham gi: {:?}",
+            control.actions
+        );
+    }
+
+    #[test]
+    fn closing_handles_several_instances_of_the_same_tracker() {
+        let mut control = RecordingControl::default();
+        let clients = vec![
+            client(10, "555555555555"),
+            client(11, "555555555555"),
+            client(12, "666666666666"),
+        ];
+
+        let closed = close_previous_instances(&mut control, &clients, "555555555555");
+
+        assert_eq!(closed, 2);
+        assert!(!control.actions.iter().any(|action| action.ends_with(":12")));
     }
 }
