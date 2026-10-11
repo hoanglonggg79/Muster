@@ -540,25 +540,35 @@ password-locked. **Đã đạt** trên thư mục RAM giả lập: 2 tài khoả
 
 > Mục tiêu: launch được nhiều account cùng lúc, thay thế được RAM cho nhu cầu cơ bản.
 
-- [ ] `core::roblox::account`: model `Account` + CRUD + `Fields` (M)
-- [ ] `core::roblox::auth`: CSRF → auth ticket, có retry và rate limit (M)
-- [ ] ⭐ `core::roblox::auth`: **đăng nhập bằng API từ `user:pass`** → cookie `.ROBLOSECURITY`
+**Trạng thái (2026-10-11): phần lõi Rust đã xong; còn hai mảng.** Đã có: `roblox::account`,
+`roblox::http` + `roblox::auth` (kèm adapter `reqwest`), `launch` (URL/legacy/mutex), `patch`,
+`datetime`. Còn lại: **điều khiển tiến trình** (`AutoCloseLastProcess` — phần logic đã xong, còn
+phần liệt kê tiến trình và đóng cửa sổ), **các lời gọi thông tin tài khoản** (`GetRobux`,
+`GetUserInfo`, presence), và **toàn bộ nhánh UI** (do người khác đảm nhiệm).
+
+- [x] `core::roblox::account`: model `Account` + CRUD + `Fields` (M)
+- [ ] `core::roblox::auth`: CSRF → auth ticket, **có retry và rate limit** (M)
+      — CSRF và ticket đã xong; retry/rate limit chưa làm.
+- [x] ⭐ `core::roblox::auth`: **đăng nhập bằng API từ `user:pass`** → cookie `.ROBLOSECURITY`
       (`POST https://auth.roblox.com/v2/login`, body `{ctype:"Username", cvalue:<user>, password:<pass>}`,
       kèm header CSRF). **RAM KHÔNG có đường này** — đây là cải tiến, cho phép nhập hàng loạt
       user:pass mà không phải tải trình duyệt ~198 MiB. Xem `docs/BROWSER.md` mục 3 (M)
-- [ ] ⭐ `core::roblox::auth`: **phân loại lỗi đăng nhập** — sai mật khẩu / captcha / 2FA /
+- [x] ⭐ `core::roblox::auth`: **phân loại lỗi đăng nhập** — sai mật khẩu / captcha / 2FA /
       rate limit / tài khoản bị khoá. Đây là điều kiện tiên quyết để biết khi nào được phép
       đề nghị người dùng tải trình duyệt (S)
 - [ ] `core::roblox::account`: `GetRobux`, `GetUserInfo`, `GetMobileInfo`, presence (M)
-- [ ] `core::launch`: dựng launch URL `roblox-player:1+...` + `HttpUtility.UrlEncode` tương đương (L)
-- [ ] `core::launch`: chế độ legacy (`RobloxPlayerBeta.exe -t ... -j ...`) — giữ để dự phòng (M)
-- [ ] `core::launch`: multi-instance — mutex `ROBLOX_singletonMutex` + sinh `BrowserTrackerID` (M)
+- [x] `core::launch`: dựng launch URL `roblox-player:1+...` + `HttpUtility.UrlEncode` tương đương (L)
+- [x] `core::launch`: chế độ legacy (`RobloxPlayerBeta.exe -t ... -j ...`) — giữ để dự phòng (M)
+- [x] `core::launch`: multi-instance — mutex `ROBLOX_singletonMutex` + sinh `BrowserTrackerID` (M)
 - [ ] `core::launch`: `AutoCloseLastProcess` đúng hành vi 2 lần `CloseMainWindow` (S)
-- [ ] `core::patch`: phát hiện version folder qua registry, ghi `ClientAppSettings.json`, FPS unlocker (M)
+      — trình tự đóng/kill đã xong và có test; còn phần liệt kê tiến trình và gọi Win32.
+- [x] `core::patch`: phát hiện version folder qua registry, ghi `ClientAppSettings.json`, FPS unlocker (M)
 - [ ] UI: danh sách account (virtual hoá), thêm/sửa/xoá, kéo thả sắp xếp (L)
 - [ ] UI: ô PlaceId / JobId, nút Join, lưu PlaceId+JobId theo account (M)
 - [ ] UI: chọn nhiều account → launch hàng loạt, có tiến trình và xử lý lỗi từng account (M)
 - [ ] `core::launch`: join VIP server từ link đầy đủ, kể cả nhánh redirect (L)
+      — dựng URL cho `PrivateServer` đã xong; còn bước đổi `privateServerLinkCode` thành
+      `accessCode` (GET trang game rồi rút `Roblox.GameLauncher.joinPrivateGame(...)`).
 
 **Nghiệm thu M1:** chọn 5 account, join cùng một PlaceId, cả 5 client chạy song song không bị kick
 "Same account launched"; không cần `handle.exe`.

@@ -35,7 +35,14 @@ regex.workspace = true
 # release candidate. Chỉ `muster-app/src-tauri` bật feature này.
 specta = { workspace = true, optional = true }
 
+# Adapter `reqwest` cho `roblox::http::Transport` (M1). Cũng để sau feature flag: `muster-core`
+# mặc định phải nhẹ và test được bằng `cargo test -p muster-core` mà không kéo theo cả cây HTTP.
+# `muster-cli` bật feature này.
+reqwest = { workspace = true, optional = true }
+
 [features]
 default = []
 # Bật derive `specta::Type` cho các type là hợp đồng với UI (Account, Branch, Format).
 specta = ["dep:specta"]
+# Bật `roblox::reqwest_transport` — bản cài đặt thật của trait `Transport`.
+http-reqwest = ["dep:reqwest"]

@@ -11,7 +11,9 @@ name = "muster-cli"
 path = "src/main.rs"
 
 [dependencies]
-muster-core.workspace = true
+# Bật adapter `reqwest` để CLI có đường gọi Roblox thật (đăng nhập, lấy auth ticket). Feature chỉ
+# được bật ở đây chứ không bật mặc định trong `muster-core`, để crate đó vẫn nhẹ khi test riêng.
+muster-core = { workspace = true, features = ["http-reqwest"] }
 muster-api.workspace = true
 anyhow.workspace = true
 clap.workspace = true

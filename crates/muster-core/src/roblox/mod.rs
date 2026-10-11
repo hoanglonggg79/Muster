@@ -8,6 +8,7 @@
 //! | [`account`] | danh sách tài khoản, CRUD, túi `Fields` | M1 |
 //! | [`http`] | lớp vận chuyển trung lập — mọi lời gọi mạng đi qua trait `Transport` | M1 |
 //! | [`auth`] | CSRF → auth ticket, đăng nhập bằng API, phân loại lỗi | M1 |
+//! | `reqwest_transport` | bản cài đặt thật của `Transport`, sau feature `http-reqwest` | M1 |
 //! | `games`, `servers`, `presence`, `batch` | server list, presence, thumbnail | M2 |
 //!
 //! Nguyên tắc bất biến #3: mọi logic nằm ở `muster-core`, dùng được từ `muster-cli`, không phụ
@@ -16,3 +17,6 @@
 pub mod account;
 pub mod auth;
 pub mod http;
+
+#[cfg(feature = "http-reqwest")]
+pub mod reqwest_transport;

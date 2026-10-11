@@ -46,6 +46,12 @@ clap = { version = "4", features = ["derive"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["trace"] }
 
+# HTTP client cho lớp xác thực Roblox (M1). Dùng `rustls` thay vì TLS của hệ điều hành để hành vi
+# giống nhau giữa các máy và không phụ thuộc cấu hình SChannel của từng bản Windows.
+# `blocking` vì `core::roblox::http::Transport` là trait đồng bộ — chỗ gọi tự quyết định chạy nó
+# trên luồng nền hay không.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
 # --- vault (M0 0.4) ------------------------------------------------------------------------
 # KDF: Argon2i v1.3 — KHÔNG phải Argon2id. Tham số đã xác minh, xem tools/fixtures-gen/provenance/.
 argon2 = "0.5"
