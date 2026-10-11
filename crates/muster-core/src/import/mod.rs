@@ -1,19 +1,3 @@
-//! # `import` — nhập dữ liệu từ một bản cài Roblox Account Manager
-//!
-//! Bốn yêu cầu bắt buộc ở `ROADMAP.md` mục 4.1, và cách module này đáp ứng:
-//!
-//! | Yêu cầu | Cách làm |
-//! | :--- | :--- |
-//! | Nhập **không phá huỷ** | Chỉ đọc file của RAM. Mọi thứ ghi ra đều nằm trong `out_dir` |
-//! | Sao lưu TRƯỚC khi ghi | [`migrate`] tạo ZIP trước khi ghi byte nào |
-//! | Báo cáo nhập | [`MigrationReport`] và [`ImportedAccounts::warnings`] |
-//! | Giữ nguyên `Fields` và các field khác | Do `models::Account` bảo toàn, xem module đó |
-//!
-//! ## Vì sao logic nằm ở core chứ không ở CLI
-//!
-//! Wizard trong UI sẽ cần đúng những bước này. Nếu để ở `muster-cli` thì UI phải viết lại, và
-//! hai bản sẽ lệch nhau. Nguyên tắc bất biến #3 nói logic phải ở core.
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,75 +6,50 @@ use crate::models::Account;
 use crate::settings::{self, IniFile, Settings};
 use crate::vault::{self, Format, VaultError};
 
-/// File chính chứa danh sách tài khoản.
 pub const ACCOUNT_FILE: &str = "AccountData.json";
-/// Danh sách game gần đây, file riêng.
 pub const RECENT_GAMES_FILE: &str = "RecentGames.json";
-/// Toàn bộ cấu hình của RAM.
 pub const SETTINGS_FILE: &str = "RAMSettings.ini";
-/// File cờ: có nó thì RAM ghi plaintext, không có thì ghi DPAPI LocalMachine (`AccountManager.cs:377-380`).
 pub const NO_ENCRYPTION_FLAG: &str = "NoEncryption.IUnderstandTheRisks.iautamor";
 
-/// Các hậu tố của bản sao `AccountData.json` mà RAM có thể để lại.
 pub const ACCOUNT_COPY_SUFFIXES: [&str; 3] = ["backup", "old", "bak"];
 
-/// Tên thư mục dữ liệu của ứng dụng trong `%APPDATA%`.
-///
-/// Trùng với codename tạm trong `[workspace.metadata.project]`, nên `tools/rename.sh` sẽ đổi
-/// theo khi chốt tên thật.
 pub const APP_DIR_NAME: &str = "muster";
 
-/// Lỗi của lớp nhập liệu.
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
-    /// Thư mục người dùng trỏ tới không tồn tại.
     #[error("thư mục không tồn tại: {0}")]
     MissingRoot(PathBuf),
 
-    /// Không tìm thấy `AccountData.json` trong thư mục đó.
     #[error("không tìm thấy {ACCOUNT_FILE} trong {0}")]
     NoAccountFile(PathBuf),
 
-    /// File gốc là nhánh password-locked nhưng không có mật khẩu để ghi lại.
     #[error("cần mật khẩu để ghi lại file ở nhánh password-locked")]
     PasswordRequiredForWrite,
 
-    /// Lỗi từ lớp vault.
     #[error(transparent)]
     Vault(#[from] VaultError),
 
-    /// Lỗi từ lớp settings.
     #[error(transparent)]
     Settings(#[from] settings::SettingsError),
 
-    /// Lỗi nén ZIP.
     #[error("lỗi ZIP: {0}")]
     Zip(#[from] zip::result::ZipError),
 
-    /// Lỗi đọc/ghi file.
     #[error("lỗi vào/ra: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Những file tìm thấy trong một bản cài RAM.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RamInstall {
-    /// Thư mục gốc đã quét.
     pub root: PathBuf,
-    /// `AccountData.json` — file chính.
     pub account_file: Option<PathBuf>,
-    /// `AccountData.json.backup` / `.old` / `.bak`, theo thứ tự đó.
     pub account_copies: Vec<PathBuf>,
-    /// `RecentGames.json`.
     pub recent_games: Option<PathBuf>,
-    /// `RAMSettings.ini`.
     pub settings: Option<PathBuf>,
-    /// Có file cờ `NoEncryption...` hay không.
     pub no_encryption_flag: bool,
 }
 
 impl RamInstall {
-    /// Mọi file cần đưa vào bản sao lưu ZIP.
     #[must_use]
     pub fn files_to_back_up(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
@@ -106,7 +65,6 @@ impl RamInstall {
         files
     }
 
-    /// `true` nếu không tìm thấy file nào của RAM.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.account_file.is_none()
@@ -117,9 +75,6 @@ impl RamInstall {
     }
 }
 
-/// Quét một thư mục để tìm các file của RAM.
-///
-/// Không đọc nội dung, chỉ kiểm tra sự tồn tại — nên gọi được trước khi biết mật khẩu.
 #[must_use]
 pub fn discover(root: &Path) -> RamInstall {
     let existing = |name: &str| {
@@ -140,28 +95,14 @@ pub fn discover(root: &Path) -> RamInstall {
     }
 }
 
-/// Kết quả đọc danh sách tài khoản từ một bản cài RAM.
 #[derive(Debug)]
 pub struct ImportedAccounts {
-    /// Tài khoản đọc được.
     pub accounts: Vec<Account>,
-    /// Nhánh định dạng đã dùng để mở.
     pub format: Format,
-    /// File thực sự đã đọc — khác `AccountData.json` khi phải dùng bản sao.
     pub source: PathBuf,
-    /// Những điều người dùng nên biết: đọc từ bản sao, file plaintext, v.v.
     pub warnings: Vec<String>,
 }
 
-/// Đọc danh sách tài khoản, tự chuyển sang bản sao nếu file chính hỏng.
-///
-/// Thứ tự thử: `AccountData.json`, rồi `.backup`, `.old`, `.bak`. Dùng được bản sao thì ghi lại
-/// một cảnh báo — người dùng cần biết mình đang khôi phục từ bản cũ chứ không phải file chính.
-///
-/// # Errors
-///
-/// Trả [`ImportError::NoAccountFile`] nếu không có file nào, hoặc lỗi của lần thử cuối cùng nếu
-/// tất cả đều hỏng.
 pub fn read_accounts(
     install: &RamInstall,
     password: Option<&str>,
@@ -228,13 +169,6 @@ pub fn read_accounts(
     ))
 }
 
-/// Đóng gói toàn bộ file của bản cài RAM vào một ZIP.
-///
-/// Trả về đường dẫn file ZIP đã tạo. Tên: `<codename>-backup-<unix_giây>.zip`.
-///
-/// # Errors
-///
-/// Trả lỗi I/O hoặc lỗi ZIP nếu không ghi được.
 pub fn backup_zip(install: &RamInstall, destination_dir: &Path) -> Result<PathBuf, ImportError> {
     std::fs::create_dir_all(destination_dir)?;
 
@@ -262,35 +196,16 @@ pub fn backup_zip(install: &RamInstall, destination_dir: &Path) -> Result<PathBu
     Ok(archive)
 }
 
-/// Báo cáo sau khi chuyển dữ liệu.
 #[derive(Debug)]
 pub struct MigrationReport {
-    /// Thư mục đã ghi dữ liệu mới vào.
     pub out_dir: PathBuf,
-    /// File ZIP sao lưu dữ liệu gốc của RAM.
     pub backup: PathBuf,
-    /// Số tài khoản đã ghi.
     pub accounts_written: usize,
-    /// Nhánh định dạng đã dùng khi ghi lại.
     pub format: Format,
-    /// `true` nếu đã ghi `settings.toml` từ `RAMSettings.ini`.
     pub settings_written: bool,
-    /// Cảnh báo cần hiển thị cho người dùng.
     pub warnings: Vec<String>,
 }
 
-/// Chuyển dữ liệu từ một bản cài RAM sang thư mục dữ liệu của `Muster`.
-///
-/// Thứ tự bắt buộc: **sao lưu ZIP trước**, rồi mới ghi. File gốc của RAM không bị sửa.
-///
-/// Nhánh mã hoá được **giữ nguyên**: file password-locked ghi lại thành password-locked, file
-/// DPAPI ghi lại bằng DPAPI LocalMachine (đúng mặc định ghi của RAM), file plaintext ghi lại
-/// plaintext kèm cảnh báo. Nhờ vậy việc nhập không tự ý đổi mức bảo vệ mà người dùng đang có.
-///
-/// # Errors
-///
-/// Trả [`ImportError::PasswordRequiredForWrite`] nếu file gốc là nhánh password-locked mà không
-/// có mật khẩu, hoặc lỗi I/O khi ghi.
 pub fn migrate(
     install: &RamInstall,
     out_dir: &Path,
@@ -298,14 +213,11 @@ pub fn migrate(
 ) -> Result<MigrationReport, ImportError> {
     std::fs::create_dir_all(out_dir)?;
 
-    // Buoc 1 — sao luu TRUOC khi ghi bat cu thu gi.
     let backup = backup_zip(install, out_dir)?;
 
-    // Buoc 2 — doc du lieu goc.
     let imported = read_accounts(install, password)?;
     let mut warnings = imported.warnings;
 
-    // Buoc 3 — cau hinh.
     let mut settings_written = false;
     if let Some(ini_path) = install.settings.as_ref() {
         let ini = IniFile::from_path(ini_path)?;
@@ -325,7 +237,6 @@ pub fn migrate(
         }
     }
 
-    // Buoc 4 — ghi lai danh sach tai khoan, giu nguyen nhanh ma hoa.
     let plaintext = vault::accounts_to_bytes(&imported.accounts)?;
     let sealed = seal_like(&plaintext, imported.format, password, &mut warnings)?;
     std::fs::write(out_dir.join(ACCOUNT_FILE), sealed)?;
@@ -348,7 +259,6 @@ pub fn migrate(
     })
 }
 
-/// Mã hoá `plaintext` theo đúng nhánh của file gốc.
 fn seal_like(
     plaintext: &[u8],
     format: Format,
@@ -384,10 +294,6 @@ fn seal_like(
     }
 }
 
-/// Thư mục dữ liệu mặc định của ứng dụng: `%APPDATA%\<codename>`.
-///
-/// Trả về thư mục hiện tại khi không đọc được `%APPDATA%` (ví dụ chạy trên nền khác Windows)
-/// thay vì panic.
 #[must_use]
 pub fn default_data_dir() -> PathBuf {
     std::env::var_os("APPDATA")
@@ -406,7 +312,6 @@ mod tests {
             .join(name)
     }
 
-    /// Dựng một thư mục giả lập bản cài RAM, dùng chính fixture có sẵn của repo.
     fn fake_install(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("muster-import-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -507,9 +412,7 @@ mod tests {
     #[test]
     fn read_accounts_falls_back_to_a_copy_when_the_main_file_is_broken() {
         let dir = fake_install("fallback");
-        // Lam hong file chinh: khong con la plain JSON, khong phai header RAM, khong phai DPAPI.
         std::fs::write(dir.join(ACCOUNT_FILE), [0x01, 0x02, 0x03, 0x04]).expect("ghi file hong");
-        // Ban sao .backup cung doi thanh plain JSON hop le de kiem nhanh du phong.
         std::fs::copy(
             fixture("accountdata.plain.json"),
             dir.join(format!("{ACCOUNT_FILE}.backup")),
@@ -554,8 +457,6 @@ mod tests {
 
         let install = discover(&dir);
         let Ok(imported) = read_accounts(&install, None) else {
-            // Blob DPAPI gắn với máy đã tạo ra nó. Máy khác không mở được là chuyện bình thường,
-            // không phải lỗi của code — xem ghi chú ở tests/vault_fixtures.rs.
             eprintln!("bỏ qua: máy này không giải mã được fixture DPAPI");
             let _ = std::fs::remove_dir_all(&dir);
             return;
@@ -596,8 +497,6 @@ mod tests {
             vec![
                 ACCOUNT_FILE.to_owned(),
                 format!("{ACCOUNT_FILE}.backup"),
-                // Thu tu theo byte: 'A' (0x41) < 'e' (0x65) nen "RAMSettings.ini" dung truoc
-                // "RecentGames.json".
                 SETTINGS_FILE.to_owned(),
                 RECENT_GAMES_FILE.to_owned(),
             ]
@@ -672,7 +571,6 @@ mod tests {
 
         assert_eq!(report.format, Format::PasswordLocked);
 
-        // File ghi ra phải mở được bằng đúng mật khẩu đó, và cho ra đúng dữ liệu.
         let (accounts, format) =
             vault::read_accounts_from_path(&out.join(ACCOUNT_FILE), Some(&password))
                 .expect("đọc lại file đã ghi");
@@ -699,7 +597,6 @@ mod tests {
             error,
             ImportError::Vault(VaultError::PasswordRequired)
         ));
-        // Sao luu van phai duoc tao truoc khi that bai.
         assert!(out.exists(), "thư mục ra phải được tạo trước khi ghi");
 
         let _ = std::fs::remove_dir_all(&dir);

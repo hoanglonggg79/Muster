@@ -3,19 +3,6 @@ import { useState } from "react";
 import { commands } from "./bindings";
 import type { VaultInspection, VaultOpenSummary } from "./bindings";
 
-/**
- * Khung giao diện của M0.
- *
- * Đây chưa phải giao diện thật — nó tồn tại để chứng minh đường IPC có kiểu thông suốt từ Rust
- * sang React. Giao diện thật thuộc nhánh UI (ROADMAP mục 6.0-UI).
- *
- * Toàn bộ type dữ liệu ở đây đến từ `bindings.ts`, file do `tauri-specta` sinh ra từ code Rust.
- * **Không** khai lại type bằng tay: mục 6.0-UI nói rõ UI không được tự định nghĩa hình dạng dữ
- * liệu, vì chỉ cần backend trả về hình dạng khác là toàn bộ phần ghép phải viết lại.
- *
- * Sinh lại bindings: `npm run codegen`.
- */
-
 type Busy = "idle" | "inspect" | "open";
 
 export function App() {

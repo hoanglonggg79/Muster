@@ -1,19 +1,3 @@
-//! Test tích hợp cho `core::vault`, chạy trên **chính 4 fixture thật** ở `tests/fixtures/`.
-//!
-//! Đây là nghiệm thu của bước M0 0.4 (`ROADMAP.md` mục 6.0): "test vector chạy xanh". Fixture được
-//! sinh bởi `tools/fixtures-gen/generate.py` bằng đúng thư viện mà RAM dùng (libsodium-net), nên
-//! nếu giải mã được chúng nghĩa là đã tương thích thật, không phải tự kiểm tra chính mình.
-//!
-//! ## Vì sao hai test DPAPI có thể tự bỏ qua
-//!
-//! Blob DPAPI gắn chặt với **máy + tài khoản Windows** đã tạo ra nó — đó là bản chất của DPAPI,
-//! không phải lỗi của code. Fixture trong repo được sinh trên một máy cụ thể, nên khi clone sang
-//! máy khác hai nhánh này không thể giải mã được nữa. Hai test dưới đây vì vậy kiểm theo kiểu
-//! "nếu mở được thì nội dung phải khớp tuyệt đối", và in cảnh báo khi máy hiện tại không mở được.
-//!
-//! Bù lại, phần DPAPI **luôn** được kiểm bằng test round-trip tự sinh blob ngay trong lúc chạy —
-//! xem `vault::dpapi::tests`. Nhờ vậy độ phủ không phụ thuộc vào máy.
-
 use std::path::{Path, PathBuf};
 
 use muster_core::models::Account;
@@ -30,8 +14,6 @@ fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("khong doc duoc {}: {e}", path.display()))
 }
 
-/// Đọc mật khẩu của fixture password-locked từ `manifest.json` thay vì chép cứng vào test —
-/// để nếu fixture được sinh lại bằng mật khẩu khác thì test vẫn đúng.
 fn fixture_password() -> String {
     let raw = fixture("manifest.json");
     let manifest: serde_json::Value =
@@ -53,8 +35,6 @@ fn plain_accounts() -> Vec<Account> {
     accounts
 }
 
-// ------------------------------------------------------------------ nhánh 4: plain JSON
-
 #[test]
 fn plain_fixture_detects_as_plain_json_and_keeps_every_field() {
     let data = fixture("accountdata.plain.json");
@@ -71,7 +51,6 @@ fn plain_fixture_detects_as_plain_json_and_keeps_every_field() {
     assert_eq!(alpha.browser_tracker_id.as_deref(), Some("100000000000001"));
     assert!(alpha.valid);
 
-    // Tui Fields la thu khong duoc phep mat — RAM luu vi tri cua so o day.
     assert_eq!(
         alpha.fields.get("Window_Position_X").map(String::as_str),
         Some("120")
@@ -85,8 +64,6 @@ fn plain_fixture_detects_as_plain_json_and_keeps_every_field() {
     assert_eq!(beta.username.as_deref(), Some("fixture_beta"));
     assert_eq!(beta.group.as_deref(), Some("007 Bank"));
 }
-
-// ------------------------------------------------------------------ nhánh 1: password-locked
 
 #[test]
 fn password_locked_fixture_detects_as_password_locked() {
@@ -137,7 +114,6 @@ fn password_locked_fixture_survives_a_re_encrypt_round_trip() {
     let plaintext = vault::accounts_to_bytes(&original).expect("tuan tu hoa");
     let sealed = vault::seal_password_locked(&plaintext, &password).expect("ma hoa lai");
 
-    // Ghi ra file tam de di het duong di that (doc tu duong dan), khong chi tren buffer.
     let temp = std::env::temp_dir().join("muster-vault-roundtrip.bin");
     std::fs::write(&temp, &sealed).expect("ghi file tam");
 
@@ -152,9 +128,6 @@ fn password_locked_fixture_survives_a_re_encrypt_round_trip() {
     );
 }
 
-// ------------------------------------------------------------------ nhánh 2/3: DPAPI
-
-/// Mở fixture DPAPI, hoặc trả `None` kèm cảnh báo nếu máy hiện tại không giải mã được.
 fn open_dpapi_fixture(name: &str) -> Option<(Vec<Account>, Format)> {
     let data = fixture(name);
     match vault::read_accounts(&data, None) {
@@ -187,12 +160,6 @@ fn dpapi_localmachine_fixture_matches_the_plain_payload_when_the_machine_can_ope
     assert_eq!(accounts, plain_accounts());
 }
 
-/// Một blob do chính ta mã hoá bằng phạm vi LocalMachine phải mở được qua [`vault::open`].
-///
-/// Test này chạy được trên mọi máy Windows (blob được sinh ngay trong lúc chạy, không phụ thuộc
-/// fixture), nên nó là bằng chứng luôn có cho đường DPAPI — bù cho hai test fixture ở trên có thể
-/// tự bỏ qua. Nó cũng là chỗ ghi lại phát hiện đã đo thật: `open` báo [`Format::Dpapi`] chung cho
-/// cả hai phạm vi, vì việc thử giải mã không cho biết phạm vi thật.
 #[cfg(windows)]
 #[test]
 fn a_locally_sealed_blob_opens_through_the_public_entry_point() {
@@ -204,8 +171,6 @@ fn a_locally_sealed_blob_opens_through_the_public_entry_point() {
     assert_eq!(opened.format, Format::Dpapi);
     assert_eq!(opened.plaintext.as_slice(), plaintext.as_slice());
 }
-
-// ------------------------------------------------------------------ tính bất biến giữa các nhánh
 
 #[test]
 fn every_fixture_that_opens_yields_exactly_the_same_accounts() {
@@ -244,7 +209,6 @@ fn the_manifest_lists_one_fixture_for_each_of_the_four_branches() {
         );
     }
 
-    // Tham so da xac minh phai duoc ghi lai trong manifest, khong duoc doi am tham.
     let verified = &manifest["verified_params"];
     assert_eq!(verified["kdf"], "Argon2i v1.3");
     assert_eq!(verified["t_cost"], vault::ARGON2_T_COST);

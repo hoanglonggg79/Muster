@@ -1,30 +1,7 @@
 #!/usr/bin/env bash
-#
-# tools/rename.sh — doi ten du an bang MOT lenh.
-#
-# Xem ROADMAP.md muc 12. Muc tieu: viec chon ten khong bao gio chan tien do, va khi chot ten
-# thi doi ten la thao tac re, khong phai di sua tay hang chuc file.
-#
-#   tools/rename.sh <TenMoi>
-#
-# Vi du:
-#   tools/rename.sh PhantomX      # display "PhantomX", codename "phantomx"
-#   tools/rename.sh Muster        # display "Muster",   codename "muster"
-#
-# Script se:
-#   1. thay ten hien thi + codename trong moi file van ban
-#   2. doi ten thu muc crate  crates/muster-*  ->  crates/<codename>-*
-#   3. cap nhat [workspace.metadata.project] trong Cargo.toml
-#   4. sinh lai Cargo.lock
-#   5. chay cargo fmt / check / test / tsc --noEmit de kiem chung
-#
-# KHONG BAO GIO cham vao:  RAM_Source/  (nguon tham chieu bat bien)
-#                          .workbuddy-ai/ (du lieu cua tro ly)
-#                          target/ node_modules/ dist/ .git/
 
 set -euo pipefail
 
-# ---------------------------------------------------------------- tien ich
 
 die() {
   printf 'loi: %s\n' "$*" >&2
@@ -47,7 +24,6 @@ lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-# ---------------------------------------------------------------- tham so
 
 if [ $# -ne 1 ]; then
   printf 'dung: %s <TenMoi>\n\n' "$(basename "$0")" >&2
@@ -68,7 +44,6 @@ esac
 NEW_SLUG="$(lower "$NEW_DISPLAY")"
 NEW_UPPER="$(printf '%s' "$NEW_DISPLAY" | tr '[:lower:]' '[:upper:]')"
 
-# ---------------------------------------------------------------- doc ten hien tai
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -91,14 +66,11 @@ if [ "$OLD_DISPLAY" = "$NEW_DISPLAY" ]; then
   die "ten moi trung voi ten hien tai — khong co gi de doi"
 fi
 
-# Neu slug moi chua slug cu thi phep thay the chuoi se de bi thay hai lan.
 case "$NEW_SLUG" in
   *"$OLD_SLUG"*) die "codename moi '$NEW_SLUG' chua codename cu '$OLD_SLUG' — chon ten khac" ;;
 esac
 
-# ---------------------------------------------------------------- canh bao git
 
-# RENAME_YES=1 de bo qua cau hoi — dung cho CI hoac khi da biet ro minh dang lam gi.
 if [ -d "$ROOT/.git" ] && [ "${RENAME_YES:-0}" != "1" ]; then
   if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
     warn "cay lam viec dang co thay doi chua commit."
@@ -113,11 +85,9 @@ if [ -d "$ROOT/.git" ] && [ "${RENAME_YES:-0}" != "1" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------- 1. thay trong noi dung
 
 info "buoc 1/5 — thay ten trong noi dung file"
 
-# -I : bo qua file nhi phan.  Cac thu muc bi loai tru la bat buoc.
 mapfile -t TARGETS < <(
   grep -rIl \
     --exclude-dir=.git \
@@ -137,7 +107,6 @@ if [ "${#TARGETS[@]}" -eq 0 ]; then
   warn "khong tim thay file nao chua '$OLD_DISPLAY' / '$OLD_SLUG'"
 else
   for f in "${TARGETS[@]}"; do
-    # Thu tu quan trong: ten hien thi truoc, roi viet hoa, roi codename.
     sed -i \
       -e "s/${OLD_DISPLAY}/${NEW_DISPLAY}/g" \
       -e "s/${OLD_UPPER}/${NEW_UPPER}/g" \
@@ -147,7 +116,6 @@ else
   ok "da sua ${#TARGETS[@]} file"
 fi
 
-# ---------------------------------------------------------------- 2. doi ten thu muc crate
 
 info "buoc 2/5 — doi ten thu muc crate"
 
@@ -163,7 +131,6 @@ for dir in "$ROOT"/crates/"$OLD_SLUG"-*; do
 done
 shopt -u nullglob
 
-# ---------------------------------------------------------------- 3. metadata
 
 info "buoc 3/5 — cap nhat [workspace.metadata.project]"
 
@@ -173,7 +140,6 @@ sed -i \
   "$MANIFEST"
 ok "display = \"$NEW_DISPLAY\", codename = \"$NEW_SLUG\""
 
-# ---------------------------------------------------------------- 4. sinh lai lockfile
 
 info "buoc 4/5 — sinh lai Cargo.lock"
 
@@ -184,7 +150,6 @@ else
   warn "khong sinh duoc Cargo.lock — chay tay: cargo generate-lockfile"
 fi
 
-# package-lock.json bi loai khoi buoc 1 (no la file sinh tu dong), nen phai lam moi no.
 APP_DIR="$ROOT/crates/$NEW_SLUG-app"
 if [ -f "$APP_DIR/package-lock.json" ]; then
   if [ -d "$APP_DIR/node_modules" ] &&
@@ -195,16 +160,12 @@ if [ -f "$APP_DIR/package-lock.json" ]; then
   fi
 fi
 
-# Cache incremental gan chat voi TEN crate. Sau khi doi ten, cache cu lam rustc ICE
-# ("the compiler unexpectedly panicked" trong encode_metadata). Don bang chinh cargo —
-# vua dung pham vi, vua khong vuong cac chan an toan cua he thong.
 if (cd "$ROOT" && cargo clean \
       -p "$NEW_SLUG-core" -p "$NEW_SLUG-api" -p "$NEW_SLUG-cli" -p "$NEW_SLUG-app" \
       >/dev/null 2>&1); then
   ok "da don artifact cu cua crate (tranh ICE do cache incremental)"
 fi
 
-# ---------------------------------------------------------------- 5. kiem chung
 
 if [ "${RENAME_SKIP_VERIFY:-0}" = "1" ]; then
   info "buoc 5/5 — kiem chung: BO QUA (RENAME_SKIP_VERIFY=1)"
@@ -248,7 +209,6 @@ if [ -d "$ROOT/crates/$NEW_SLUG-app" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------- ket
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

@@ -1,103 +1,55 @@
-//! # `roblox::account` — danh sách tài khoản và thao tác trên đó
-//!
-//! Tái lập ngữ nghĩa của `AccountManager.AccountsList` trong `RAM_Source/`, nhưng tách khỏi
-//! WinForms: ở đây chỉ có dữ liệu và các phép biến đổi thuần, kiểm thử được bằng `cargo test`.
-//!
-//! ## Ba điểm hành vi lấy nguyên từ RAM
-//!
-//! 1. **Gộp theo `UserID`, không phải theo cookie.** `AccountManager.cs:577-594`: nếu đã có tài
-//!    khoản cùng `UserID` thì RAM cập nhật cookie + mật khẩu + `LastUse` của bản cũ **tại chỗ**,
-//!    thay vì thêm một dòng trùng. Nhờ vậy thêm lại cùng một tài khoản bằng cookie mới không sinh
-//!    ra hai dòng.
-//! 2. **Kéo thả vừa đổi vị trí vừa đổi nhóm.** `AccountManager.cs:1905-1925`: thả một tài khoản
-//!    vào dòng nào thì nó nhận luôn nhóm của dòng đó.
-//! 3. **Túi `Fields` là của người dùng.** RAM để vị trí cửa sổ (`Window_Position_X/Y`,
-//!    `Window_Width/Height`) và mọi field người dùng tự thêm trong đó; mất túi này là mất dữ liệu
-//!    (nguyên tắc bất biến #2). Xem [`crate::models::Account::get_field`] và hai hàm anh em.
-//!
-//! ## Vì sao là một kiểu bọc chứ không phải hàm trên `Vec<Account>`
-//!
-//! Vì có bất biến cần giữ: chỉ số luôn hợp lệ, và thao tác thêm phải đi qua luật gộp ở trên. Bọc
-//! lại cho ta đúng một chỗ để kiểm soát điều đó, thay vì rải `Vec` khắp nơi rồi mỗi nơi tự nhớ.
-
 use crate::models::Account;
 
-/// Kết quả của một lần thêm tài khoản.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddOutcome {
-    /// Chưa có tài khoản cùng `UserID` — đã thêm vào cuối danh sách.
     Added,
-    /// Đã có tài khoản cùng `UserID` — đã cập nhật cookie/mật khẩu/`LastUse` của bản cũ.
     MergedIntoExisting,
 }
 
-/// Lỗi của các thao tác trên danh sách tài khoản.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AccountError {
-    /// Chỉ số nằm ngoài danh sách.
     #[error("chỉ số {index} ngoài phạm vi (độ dài {len})")]
-    IndexOutOfRange {
-        /// Chỉ số đã yêu cầu.
-        index: usize,
-        /// Độ dài danh sách tại thời điểm gọi.
-        len: usize,
-    },
+    IndexOutOfRange { index: usize, len: usize },
 
-    /// Cố thêm một tài khoản chưa xác thực (`Valid = false`).
-    ///
-    /// RAM cũng từ chối trường hợp này (`AddAccount` trả `null` khi `account.Valid == false`) —
-    /// một dòng không có `UserID` và `Username` thì vô dụng và chỉ làm rối danh sách.
     #[error("tài khoản chưa xác thực (Valid = false) nên không được thêm vào danh sách")]
     NotValid,
 }
 
-/// Danh sách tài khoản, giữ đúng ngữ nghĩa của `AccountManager.AccountsList`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AccountStore {
     accounts: Vec<Account>,
 }
 
 impl AccountStore {
-    /// Danh sách rỗng.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Bọc một `Vec` có sẵn (ví dụ vừa đọc từ vault).
     #[must_use]
     pub fn from_accounts(accounts: Vec<Account>) -> Self {
         Self { accounts }
     }
 
-    /// Toàn bộ tài khoản, theo đúng thứ tự đang lưu.
     #[must_use]
     pub fn accounts(&self) -> &[Account] {
         &self.accounts
     }
 
-    /// Số tài khoản.
     #[must_use]
     pub fn len(&self) -> usize {
         self.accounts.len()
     }
 
-    /// `true` nếu danh sách rỗng.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.accounts.is_empty()
     }
 
-    /// Duyệt tài khoản theo thứ tự.
     pub fn iter(&self) -> std::slice::Iter<'_, Account> {
         self.accounts.iter()
     }
 
-    /// Tài khoản tại `index`.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::IndexOutOfRange`] nếu `index` vượt quá độ dài.
     pub fn get(&self, index: usize) -> Result<&Account, AccountError> {
         self.accounts
             .get(index)
@@ -107,11 +59,6 @@ impl AccountStore {
             })
     }
 
-    /// Tài khoản tại `index`, cho sửa tại chỗ.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::IndexOutOfRange`] nếu `index` vượt quá độ dài.
     pub fn get_mut(&mut self, index: usize) -> Result<&mut Account, AccountError> {
         let len = self.accounts.len();
         self.accounts
@@ -119,7 +66,6 @@ impl AccountStore {
             .ok_or(AccountError::IndexOutOfRange { index, len })
     }
 
-    /// Vị trí của tài khoản có `UserID` cho trước.
     #[must_use]
     pub fn find_by_user_id(&self, user_id: i64) -> Option<usize> {
         self.accounts
@@ -127,10 +73,6 @@ impl AccountStore {
             .position(|account| account.user_id == user_id)
     }
 
-    /// Vị trí của tài khoản có `Username` cho trước, không phân biệt hoa thường.
-    ///
-    /// Không phân biệt hoa thường vì tên đăng nhập Roblox cũng vậy, và người dùng hay gõ lại tên
-    /// với cách viết khác.
     #[must_use]
     pub fn find_by_username(&self, username: &str) -> Option<usize> {
         self.accounts.iter().position(|account| {
@@ -141,29 +83,17 @@ impl AccountStore {
         })
     }
 
-    /// Thêm tài khoản, áp luật gộp theo `UserID` của RAM.
-    ///
-    /// Trả về kết quả và **vị trí** của tài khoản trong danh sách sau thao tác — chỗ gọi thường
-    /// cần vị trí để cuộn tới dòng vừa thêm.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::NotValid`] nếu `account.valid == false`.
     pub fn add(&mut self, account: Account) -> Result<(AddOutcome, usize), AccountError> {
         if !account.valid {
             return Err(AccountError::NotValid);
         }
 
-        // Chỉ gộp khi có UserID thật. `user_id == 0` nghĩa là chưa tra được UserID từ Roblox;
-        // gộp theo nó sẽ nuốt nhầm mọi tài khoản chưa xác thực vào cùng một dòng.
         if account.user_id != 0 {
             if let Some(index) = self
                 .accounts
                 .iter()
                 .position(|candidate| candidate.user_id == account.user_id)
             {
-                // Đúng ba field mà RAM cập nhật (AccountManager.cs:583-585). Các field còn lại —
-                // Alias, Description, Group, Fields — là của người dùng, không được đụng vào.
                 let existing = &mut self.accounts[index];
                 existing.security_token = account.security_token;
                 existing.password = account.password;
@@ -177,11 +107,6 @@ impl AccountStore {
         Ok((AddOutcome::Added, self.accounts.len() - 1))
     }
 
-    /// Xoá tài khoản tại `index`, trả về tài khoản đã xoá.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::IndexOutOfRange`] nếu `index` vượt quá độ dài.
     pub fn remove(&mut self, index: usize) -> Result<Account, AccountError> {
         if index >= self.accounts.len() {
             return Err(AccountError::IndexOutOfRange {
@@ -192,32 +117,16 @@ impl AccountStore {
         Ok(self.accounts.remove(index))
     }
 
-    /// Xoá tài khoản theo `UserID`, trả về tài khoản đã xoá nếu có.
     pub fn remove_by_user_id(&mut self, user_id: i64) -> Option<Account> {
         let index = self.find_by_user_id(user_id)?;
         Some(self.accounts.remove(index))
     }
 
-    /// Gán nhóm cho tài khoản tại `index`. `None` nghĩa là trả về nhóm mặc định của RAM.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::IndexOutOfRange`] nếu `index` vượt quá độ dài.
     pub fn set_group(&mut self, index: usize, group: Option<String>) -> Result<(), AccountError> {
         self.get_mut(index)?.group = group;
         Ok(())
     }
 
-    /// Di chuyển tài khoản, đồng thời cho nó nhận nhóm của dòng đích — đúng hành vi kéo thả của
-    /// RAM (`AccountManager.cs:1905-1925`).
-    ///
-    /// `to` hiểu theo danh sách **trước khi** di chuyển, giống `DropTargetIndex` của
-    /// ObjectListView. Ví dụ `[A,B,C]` rồi `move_account(0, 2)` cho ra `[B,C,A]` và `A` mang nhóm
-    /// của `C`.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AccountError::IndexOutOfRange`] nếu `from` hoặc `to` vượt quá độ dài.
     pub fn move_account(&mut self, from: usize, to: usize) -> Result<(), AccountError> {
         let len = self.accounts.len();
         if from >= len {
@@ -234,23 +143,16 @@ impl AccountStore {
         let mut moved = self.accounts.remove(from);
         moved.group = target_group;
 
-        // Sau khi remove, danh sách ngắn đi 1 nên kẹp lại cho an toàn.
         let landing = to.min(self.accounts.len());
         self.accounts.insert(landing, moved);
         Ok(())
     }
 
-    /// Sắp xếp theo nhóm, giữ nguyên thứ tự tương đối trong cùng một nhóm.
-    ///
-    /// Dùng [`Account::group_or_default`] nên tài khoản không có nhóm rơi vào `"Default"` — đúng
-    /// giá trị mặc định của RAM. Sắp xếp **ổn định** để tài khoản cùng nhóm không nhảy loạn sau
-    /// mỗi lần sắp.
     pub fn sort_by_group(&mut self) {
         self.accounts
             .sort_by(|left, right| left.group_or_default().cmp(right.group_or_default()));
     }
 
-    /// Lấy lại `Vec` bên trong, dùng khi cần ghi xuống vault.
     #[must_use]
     pub fn into_accounts(self) -> Vec<Account> {
         self.accounts

@@ -1,48 +1,3 @@
-//! # `vault` — đọc/ghi `AccountData.json` tương thích Roblox Account Manager
-//!
-//! Module này là hợp đồng tương thích ngược quan trọng nhất của dự án: người dùng RAM phải
-//! chuyển sang được mà không mất dữ liệu (nguyên tắc bất biến #2). Mọi con số ở đây đã được
-//! xác minh trực tiếp từ `RAM_Source/`, không có chỗ nào là phỏng đoán.
-//!
-//! ## Bốn nhánh định dạng phải đọc được
-//!
-//! | # | Nhánh | Nhận diện | Cách giải mã |
-//! | :--- | :--- | :--- | :--- |
-//! | 1 | Password-locked | 64 byte đầu khớp [`RAM_HEADER`] | Argon2i → `secretbox` |
-//! | 2 | DPAPI CurrentUser | không khớp header, `CryptUnprotectData` ra UTF-8 | scope CurrentUser |
-//! | 3 | DPAPI LocalMachine | như trên | scope LocalMachine |
-//! | 4 | Plain JSON | byte đầu là `[` | đọc thẳng UTF-8 |
-//!
-//! [`detect_branch`] chỉ nhìn phần mở đầu nên phân biệt được **3** khả năng. Vì vậy có hai enum:
-//! [`Branch`] cho *phỏng đoán rẻ tiền*, [`Format`] cho *đã mở được bằng cách nào*.
-//!
-//! ⚠️ **Nhánh 2 và 3 không tách được.** Đã đo thật: một blob DPAPI phạm vi máy vẫn mở được bằng
-//! đường CurrentUser, nên không thể suy ra phạm vi từ việc thử giải mã. [`Format`] vì vậy chỉ có
-//! một biến thể `Dpapi` — xem ghi chú đầy đủ ở đó. Chiến lược thử lần lượt CurrentUser rồi
-//! LocalMachine vẫn được giữ, vì nó tối đa hoá khả năng mở được file.
-//!
-//! ## Layout nhị phân của nhánh 1
-//!
-//! ```text
-//! offset 0    : 64 byte  RAM_HEADER
-//! offset 64   : 16 byte  salt
-//! offset 80   : 24 byte  nonce
-//! offset 104  : phần còn lại  secretbox
-//! ```
-//!
-//! ⚠️ **Vị trí 16 byte MAC.** `ROADMAP.md` mục 4.1 ghi "gồm 16 byte MAC ở cuối" — **sai**.
-//! `crypto_secretbox_easy` của libsodium (mà `Sodium.SecretBox.Encrypt` gọi tới) đặt MAC ở
-//! **đầu**: 16 byte đầu của phần sau nonce là MAC, phần còn lại mới là ciphertext. Xem [`MAC_LEN`].
-//!
-//! ## Tham số Argon2 — ĐÃ XÁC MINH, không được đoán
-//!
-//! Nguồn: dịch ngược IL `Sodium.PasswordHash` của `libsodium-net 0.10.0` và đối chiếu với
-//! native `libsodium 1.0.11`. Bằng chứng tái lập được ở `tools/fixtures-gen/provenance/`.
-//!
-//! - Thuật toán: **Argon2i**, **không phải Argon2id**. Dùng Argon2id là giải mã sai 100%.
-//! - `t_cost = 6`, `m_cost = 131072` KiB (128 MiB), `p_cost = 1`, khoá ra 32 byte.
-//! - Đầu vào của Argon2 là **SHA-512(password)** (64 byte), không phải password thô.
-
 #[cfg(windows)]
 pub mod dpapi;
 
@@ -55,94 +10,45 @@ use zeroize::Zeroizing;
 
 use crate::models::Account;
 
-/// 64 byte magic mở đầu file password-locked.
-///
-/// `Classes/Cryptography.cs:10` — giữ nguyên từng byte, kể cả 7 dấu chấm ở cuối.
 pub const RAM_HEADER: &[u8] = b"Roblox Account Manager created by ic3w0lf22 @ github.com .......";
 
-/// Entropy 56 byte dùng cho cả hai nhánh DPAPI.
-///
-/// `AccountManager.cs:93`. Giữ nguyên lỗi chính tả gốc **"BUY"** (không phải "BY") —
-/// sai một byte là không giải mã được.
 pub const DPAPI_ENTROPY: &[u8] = b"ROBLOX ACCOUNT MANAGER | :) | BROUGHT TO YOU BUY ic3w0lf";
 
-/// Độ dài salt của Argon2i (`crypto_pwhash_argon2i_saltbytes`).
 pub const SALT_LEN: usize = 16;
-/// Độ dài nonce của `secretbox` (`crypto_secretbox_noncebytes`).
 pub const NONCE_LEN: usize = 24;
-/// Độ dài khoá dẫn xuất.
 pub const ARGON2_OUT_LEN: usize = 32;
-/// Số vòng (time cost).
 pub const ARGON2_T_COST: u32 = 6;
-/// Bộ nhớ tính bằng KiB (128 MiB).
 pub const ARGON2_M_COST_KIB: u32 = 131_072;
-/// Số làn song song.
 pub const ARGON2_P_COST: u32 = 1;
 
-/// Độ dài MAC của secretbox (`crypto_secretbox_MACBYTES`).
-///
-/// ⚠️ MAC nằm ở **đầu** phần dữ liệu sau nonce, không phải ở cuối.
 pub const MAC_LEN: usize = 16;
 
-/// Offset của salt trong file nhánh 1.
 pub const SALT_OFFSET: usize = RAM_HEADER.len();
-/// Offset của nonce trong file nhánh 1.
 pub const NONCE_OFFSET: usize = SALT_OFFSET + SALT_LEN;
-/// Offset của phần secretbox trong file nhánh 1.
 pub const CIPHERTEXT_OFFSET: usize = NONCE_OFFSET + NONCE_LEN;
-/// Kích thước tối thiểu để một file có thể là nhánh 1 (đã tính cả MAC).
 pub const MIN_PASSWORD_LOCKED_LEN: usize = CIPHERTEXT_OFFSET + MAC_LEN;
 
 const _: () = assert!(RAM_HEADER.len() == 64);
 const _: () = assert!(DPAPI_ENTROPY.len() == 56);
 const _: () = assert!(CIPHERTEXT_OFFSET == 104);
 
-/// Nhánh định dạng **đoán được** chỉ từ phần mở đầu của file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum Branch {
-    /// 64 byte đầu khớp [`RAM_HEADER`].
     PasswordLocked,
-    /// Không khớp header, và byte đầu không phải `[`. Có thể là CurrentUser hoặc LocalMachine.
     Dpapi,
-    /// Byte đầu tiên là `[` — JSON thô.
     PlainJson,
 }
 
-/// Nhánh định dạng **thực sự đã dùng** để mở được nội dung.
-///
-/// Khác [`Branch`] ở chỗ [`Branch`] là phỏng đoán rẻ tiền từ phần mở đầu (một file hỏng cũng cho
-/// ra [`Branch::Dpapi`]), còn `Format` chỉ được sinh ra khi nội dung **đã giải mã thành công**.
-/// Đây cũng là kiểu được trả cho `muster-cli` và cho UI, nên nó là hợp đồng công khai.
-///
-/// ## Vì sao DPAPI chỉ có một biến thể, không tách CurrentUser / LocalMachine
-///
-/// `ROADMAP.md` mục 4.1 mô tả nhánh 2 và 3 là hai phạm vi khác nhau, và trình nhập nên thử
-/// CurrentUser trước rồi LocalMachine. Chiến lược thử đó vẫn đúng và vẫn được dùng ở [`open`] —
-/// nhưng **kết quả thử không cho biết phạm vi thật**.
-///
-/// Đo thật trên Windows (2026-10-10, xem `tests/vault_fixtures.rs`): cả hai fixture DPAPI đều
-/// giải mã được **với và cả không có** cờ `CRYPTPROTECT_LOCAL_MACHINE`. Tức là một blob phạm vi
-/// máy vẫn mở được bằng đường CurrentUser. Vì vậy nếu báo cáo nhập ghi "dpapi-currentuser" thì
-/// đó là khẳng định sai sự thật trong trường hợp phổ biến nhất.
-///
-/// Hệ quả: nhánh DPAPI được báo cáo chung là `dpapi`. Việc ghi thì vẫn chọn được phạm vi —
-/// xem [`seal_dpapi`]. Trường hợp ngoại lệ duy nhất đáng ghi nhận: nếu đường không cờ thất bại
-/// mà đường có cờ thành công thì chắc chắn là blob phạm vi máy, nhưng trường hợp đó hiếm và
-/// không đủ để đổi hình dạng của kiểu công khai.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum Format {
-    /// Nhánh 1 — Argon2i + secretbox, cần mật khẩu.
     PasswordLocked,
-    /// Nhánh 2 hoặc 3 — DPAPI, đã mở được (không phân biệt được phạm vi, xem ghi chú trên).
     Dpapi,
-    /// Nhánh 4 — JSON thô.
     PlainJson,
 }
 
 impl Format {
-    /// Tên ngắn để hiển thị trong báo cáo nhập.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -152,75 +58,48 @@ impl Format {
         }
     }
 
-    /// `true` nếu nhánh này gắn với máy hoặc tài khoản Windows đã tạo ra file.
-    ///
-    /// Wizard nhập dùng cờ này để khuyến nghị người dùng chuyển sang nhánh password-locked
-    /// (rủi ro #5 trong `ROADMAP.md`).
     #[must_use]
     pub const fn is_machine_bound(self) -> bool {
         matches!(self, Self::Dpapi)
     }
 }
 
-/// Lỗi của lớp vault.
-///
-/// **Không** biến thể nào chứa mật khẩu, cookie hay plaintext — đây là điều kiện để log lỗi
-/// không làm rò rỉ secret (nguyên tắc bất biến #4).
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
-    /// File không bắt đầu bằng [`RAM_HEADER`] nên không phải nhánh 1.
     #[error("file không khớp magic RAMHeader nên không phải nhánh password-locked")]
     BadHeader,
 
-    /// File ngắn hơn mức tối thiểu của nhánh 1.
     #[error("file quá ngắn: {len} byte, cần tối thiểu {min} byte cho nhánh password-locked")]
-    TooShort {
-        /// Độ dài thực tế.
-        len: usize,
-        /// Độ dài tối thiểu cần có.
-        min: usize,
-    },
+    TooShort { len: usize, min: usize },
 
-    /// File là nhánh 1 nhưng người dùng chưa cung cấp mật khẩu.
     #[error("file được khoá bằng mật khẩu, cần cung cấp mật khẩu để mở")]
     PasswordRequired,
 
-    /// Dẫn xuất khoá Argon2 thất bại (tham số không hợp lệ).
     #[error("dẫn xuất khoá Argon2 thất bại")]
     Argon2,
 
-    /// Giải mã secretbox thất bại — hầu như luôn là do sai mật khẩu.
     #[error("giải mã thất bại: sai mật khẩu hoặc file bị hỏng")]
     Decrypt,
 
-    /// Không lấy được số ngẫu nhiên từ hệ điều hành.
     #[error("không lấy được số ngẫu nhiên từ hệ điều hành")]
     Random,
 
-    /// Lớp DPAPI từ chối.
     #[cfg(windows)]
     #[error(transparent)]
     Dpapi(#[from] dpapi::DpapiError),
 
-    /// Không nhận ra file thuộc nhánh nào.
     #[error(
         "không nhận ra định dạng file: không phải plain JSON, không phải password-locked, và DPAPI từ chối giải mã"
     )]
     UnknownFormat,
 
-    /// JSON không hợp lệ.
     #[error("JSON không hợp lệ: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// Lỗi đọc/ghi file.
     #[error("lỗi vào/ra: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Đoán nhánh định dạng từ nội dung file.
-///
-/// Chỉ nhìn vào phần mở đầu. Việc thử giải mã DPAPI theo từng scope là việc của [`open`] —
-/// [`Branch::Dpapi`] ở đây chỉ nghĩa là "không phải hai nhánh còn lại".
 #[must_use]
 pub fn detect_branch(data: &[u8]) -> Branch {
     if data.starts_with(RAM_HEADER) {
@@ -232,14 +111,6 @@ pub fn detect_branch(data: &[u8]) -> Branch {
     }
 }
 
-/// Dẫn xuất khoá 32 byte từ mật khẩu và salt.
-///
-/// ⚠️ Đầu vào của Argon2 **không phải** mật khẩu thô mà là `SHA-512(mật khẩu)` — 64 byte.
-/// Bỏ qua bước băm này sẽ cho ra khoá khác hoàn toàn.
-///
-/// # Errors
-///
-/// Trả [`VaultError::Argon2`] nếu bộ tham số bị từ chối.
 pub fn derive_key(
     password: &str,
     salt: &[u8; SALT_LEN],
@@ -274,13 +145,6 @@ fn random_bytes(buffer: &mut [u8]) -> Result<(), VaultError> {
     getrandom::getrandom(buffer).map_err(|_| VaultError::Random)
 }
 
-/// Giải mã một file nhánh 1 (password-locked).
-///
-/// # Errors
-///
-/// - [`VaultError::BadHeader`] nếu file không bắt đầu bằng [`RAM_HEADER`].
-/// - [`VaultError::TooShort`] nếu file ngắn hơn [`MIN_PASSWORD_LOCKED_LEN`].
-/// - [`VaultError::Decrypt`] nếu sai mật khẩu hoặc file hỏng.
 pub fn open_password_locked(data: &[u8], password: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     if !data.starts_with(RAM_HEADER) {
         return Err(VaultError::BadHeader);
@@ -296,7 +160,6 @@ pub fn open_password_locked(data: &[u8], password: &str) -> Result<Zeroizing<Vec
     salt.copy_from_slice(&data[SALT_OFFSET..NONCE_OFFSET]);
     let nonce = &data[NONCE_OFFSET..CIPHERTEXT_OFFSET];
 
-    // MAC nam o DAU, khong phai o cuoi — xem ghi chu o MAC_LEN.
     let (tag, ciphertext) = data[CIPHERTEXT_OFFSET..].split_at(MAC_LEN);
 
     let key = derive_key(password, &salt)?;
@@ -315,14 +178,6 @@ pub fn open_password_locked(data: &[u8], password: &str) -> Result<Zeroizing<Vec
     Ok(buffer)
 }
 
-/// Mã hoá `plaintext` thành file nhánh 1 với mật khẩu cho trước.
-///
-/// Salt và nonce được sinh mới mỗi lần gọi, nên hai lần gọi trên cùng dữ liệu cho ra hai file khác nhau.
-///
-/// # Errors
-///
-/// Trả [`VaultError::Random`] nếu hệ điều hành không cấp được số ngẫu nhiên,
-/// [`VaultError::Argon2`] nếu dẫn xuất khoá thất bại.
 pub fn seal_password_locked(plaintext: &[u8], password: &str) -> Result<Vec<u8>, VaultError> {
     let mut salt = [0u8; SALT_LEN];
     let mut nonce = [0u8; NONCE_LEN];
@@ -346,14 +201,8 @@ pub fn seal_password_locked(plaintext: &[u8], password: &str) -> Result<Vec<u8>,
     Ok(out)
 }
 
-/// Nội dung đã giải mã kèm thông tin đã mở bằng nhánh nào.
-///
-/// Cố tình **không** derive `Debug`: `plaintext` chứa cookie và mật khẩu, in ra log là rò rỉ secret.
-/// Bản `Debug` viết tay dưới đây chỉ in ra độ dài.
 pub struct Opened {
-    /// Nội dung gốc (JSON). Tự động được ghi đè khi rơi khỏi scope.
     pub plaintext: Zeroizing<Vec<u8>>,
-    /// Nhánh định dạng đã dùng để mở.
     pub format: Format,
 }
 
@@ -369,17 +218,6 @@ impl std::fmt::Debug for Opened {
     }
 }
 
-/// Mở nội dung của một `AccountData.json` bất kỳ, tự dò nhánh.
-///
-/// Thứ tự thử:
-/// 1. Plain JSON — rẻ nhất, và blob DPAPI không bao giờ bắt đầu bằng `[` nên không thể nhầm.
-/// 2. Password-locked — nếu file khớp [`RAM_HEADER`]. Không có mật khẩu thì báo
-///    [`VaultError::PasswordRequired`] chứ không âm thầm thử tiếp.
-/// 3. DPAPI CurrentUser rồi DPAPI LocalMachine — theo đúng thứ tự ở `ROADMAP.md` mục 4.1.
-///
-/// # Errors
-///
-/// Trả [`VaultError::UnknownFormat`] nếu không nhánh nào mở được.
 pub fn open(data: &[u8], password: Option<&str>) -> Result<Opened, VaultError> {
     if data.first() == Some(&b'[') {
         return Ok(Opened {
@@ -399,8 +237,6 @@ pub fn open(data: &[u8], password: Option<&str>) -> Result<Opened, VaultError> {
     #[cfg(windows)]
     {
         use dpapi::Scope;
-        // Thu CurrentUser truoc roi LocalMachine: nguyen tac bat bien #2 — toi da hoa kha nang mo
-        // duoc file. Ca hai duong deu bao ve Format::Dpapi vi khong phan biet duoc pham vi that.
         let attempt = dpapi::unprotect(data, DPAPI_ENTROPY, Scope::CurrentUser)
             .or_else(|_| dpapi::unprotect(data, DPAPI_ENTROPY, Scope::LocalMachine));
 
@@ -415,11 +251,6 @@ pub fn open(data: &[u8], password: Option<&str>) -> Result<Opened, VaultError> {
     Err(VaultError::UnknownFormat)
 }
 
-/// Đọc danh sách tài khoản từ nội dung một `AccountData.json`.
-///
-/// # Errors
-///
-/// Trả lỗi từ [`open`], hoặc [`VaultError::Json`] nếu nội dung không phải mảng `Account`.
 pub fn read_accounts(
     data: &[u8],
     password: Option<&str>,
@@ -429,11 +260,6 @@ pub fn read_accounts(
     Ok((accounts, opened.format))
 }
 
-/// Như [`read_accounts`] nhưng đọc thẳng từ đường dẫn.
-///
-/// # Errors
-///
-/// Trả [`VaultError::Io`] nếu không đọc được file, cộng các lỗi của [`read_accounts`].
 pub fn read_accounts_from_path(
     path: &Path,
     password: Option<&str>,
@@ -442,26 +268,10 @@ pub fn read_accounts_from_path(
     read_accounts(&data, password)
 }
 
-/// Tuần tự hoá danh sách tài khoản thành JSON đúng định dạng RAM ghi.
-///
-/// Dùng JSON nén (không thụt lề) vì `JsonConvert.SerializeObject` mặc định cũng vậy.
-///
-/// # Errors
-///
-/// Trả [`VaultError::Json`] nếu không tuần tự hoá được.
 pub fn accounts_to_bytes(accounts: &[Account]) -> Result<Vec<u8>, VaultError> {
     Ok(serde_json::to_vec(accounts)?)
 }
 
-/// Mã hoá nội dung để ghi xuống đĩa theo đúng quy tắc của RAM.
-///
-/// RAM quyết định ở `AccountManager.cs:377-380`: có file cờ `NoEncryption...` thì ghi plain UTF-8,
-/// không có thì ghi **DPAPI LocalMachine** kèm entropy. Ở M0 hàm này chỉ phục vụ test round-trip;
-/// chính sách chọn nhánh khi ghi thật thuộc M1.
-///
-/// # Errors
-///
-/// Trả [`VaultError::Dpapi`] nếu Win32 từ chối.
 #[cfg(windows)]
 pub fn seal_dpapi(plaintext: &[u8], scope: dpapi::Scope) -> Result<Vec<u8>, VaultError> {
     Ok(dpapi::protect(plaintext, DPAPI_ENTROPY, scope)?)
@@ -504,7 +314,6 @@ mod tests {
 
         assert_eq!(detect_branch(b"[{\"Username\":\"a\"}]"), Branch::PlainJson);
 
-        // blob DPAPI: khong khop header, khong bat dau bang '['
         assert_eq!(
             detect_branch(&[0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C]),
             Branch::Dpapi
@@ -515,7 +324,6 @@ mod tests {
 
     #[test]
     fn a_short_truncated_password_locked_file_is_still_detected() {
-        // detect_branch khong duoc panic voi input cut ngan
         assert_eq!(detect_branch(&RAM_HEADER[..10]), Branch::Dpapi);
         assert_eq!(detect_branch(RAM_HEADER), Branch::PasswordLocked);
     }

@@ -9,7 +9,6 @@ SECRET = hashlib.sha512(PASSWORD).digest()
 
 TARGET = json.load(open("libsodium_vectors.json"))
 
-# libsodium: memlimit bytes / 1024 -> m_cost in KiB
 PLAN = {
     "Moderate": 134217728 // 1024,
     "Interactive": 33554432 // 1024,

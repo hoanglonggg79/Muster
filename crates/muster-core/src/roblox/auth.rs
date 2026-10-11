@@ -1,59 +1,15 @@
-//! # `roblox::auth` — CSRF, auth ticket, và đăng nhập bằng API
-//!
-//! Ba việc, theo đúng thứ tự phụ thuộc:
-//!
-//! 1. **Xin CSRF token.** Roblox từ chối `POST` không có header `X-CSRF-TOKEN` bằng `403` kèm
-//!    token trong header `x-csrf-token`. Đây là cách "xin" token: cố tình gọi một lần để bị từ chối.
-//! 2. **Đổi cookie lấy auth ticket.** Gọi lại chính endpoint đó, lần này kèm token; Roblox trả
-//!    ticket trong header `rbx-authentication-ticket`. Ticket này là thứ nhét vào URL mở game.
-//! 3. **Đăng nhập bằng `user:pass`.** `POST auth.roblox.com/v2/login`, body
-//!    `{"ctype":"Username","cvalue":"<user>","password":"<pass>"}`, kèm token CSRF; thành công thì
-//!    Roblox đặt cookie `.ROBLOSECURITY`.
-//!
-//! ## Vì sao bước 3 là cải tiến, không phải port
-//!
-//! RAM **không có** đường đăng nhập bằng API. `user:pass` trong RAM chỉ là chữ được gõ sẵn vào
-//! form của Chromium, và tính năng nhập hàng loạt mở **một cửa sổ trình duyệt cho mỗi dòng**
-//! (`AccountManager.cs:1396-1417`). Nghĩa là muốn thêm 20 tài khoản bằng `user:pass` thì RAM bắt
-//! tải ~198 MiB Chromium và mở 20 cửa sổ. Gọi thẳng API bỏ hẳn được cả hai. Xem `docs/BROWSER.md`
-//! mục 3.
-//!
-//! ## Phân loại lỗi là điều kiện tiên quyết, không phải tính năng phụ
-//!
-//! Biết được "sai mật khẩu" khác với "cần captcha" là điều kiện để quyết định **có nên đề nghị
-//! người dùng tải trình duyệt hay không**. Sai mật khẩu thì mở trình duyệt cũng vô ích; captcha
-//! thì bắt buộc phải có trình duyệt. Vì vậy [`classify_login_failure`] là một hàm thuần, tách hẳn
-//! khỏi lời gọi mạng, và có test cho từng nhánh.
-//!
-//! ⚠️ **Chưa đối chiếu với Roblox thật.** Hình dạng phản hồi (header `rblx-challenge-type`, cấu
-//! trúc `errors[].message`) lấy từ tài liệu và quan sát cộng đồng, chưa chạy thật trong phiên làm
-//! việc này. Vì vậy hàm phân loại đọc **nhiều dấu hiệu** cùng lúc và mọi nhánh đều có test để chỉnh
-//! lại chỉ tốn một dòng. Cần một lần chạy thật để chốt.
-
 use zeroize::Zeroizing;
 
 use super::http::{HttpMethod, HttpRequest, HttpResponse, Transport, TransportError};
 
-/// `Referer` mà RAM gửi kèm các lời gọi xác thực — `Account.cs:118`.
-///
-/// Trỏ vào một game cụ thể (Brookhaven) là lựa chọn của RAM; Roblox không đòi hỏi referer trỏ vào
-/// game nào, chỉ cần nó hợp lệ. Giữ nguyên để không tự tạo khác biệt.
 pub const BROWSER_REFERER: &str = "https://www.roblox.com/games/4924922222/Brookhaven-RP";
 
-/// Tên cookie phiên đăng nhập.
 pub const SECURITY_COOKIE: &str = ".ROBLOSECURITY";
 
-/// Các địa chỉ gốc của Roblox API mà M1 cần.
-///
-/// Tách thành dữ liệu chứ không viết cứng trong hàm, để test đổi được sang một transport giả mà
-/// không phải sửa logic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoints {
-    /// `https://auth.roblox.com` — CSRF, ticket, đăng nhập.
     pub auth: String,
-    /// `https://www.roblox.com` — thông tin tài khoản.
     pub www: String,
-    /// `https://users.roblox.com` — hồ sơ người dùng.
     pub users: String,
 }
 
@@ -67,67 +23,36 @@ impl Default for Endpoints {
     }
 }
 
-/// Lỗi của lớp xác thực.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthError {
-    /// Không gọi được mạng.
     #[error(transparent)]
     Transport(#[from] TransportError),
 
-    /// Phản hồi không kèm header `x-csrf-token`.
     #[error("Roblox không trả về header x-csrf-token (HTTP {status})")]
-    MissingCsrfToken {
-        /// Mã trạng thái của phản hồi.
-        status: u16,
-    },
+    MissingCsrfToken { status: u16 },
 
-    /// Phản hồi không kèm header `rbx-authentication-ticket`.
     #[error("Roblox không trả về header rbx-authentication-ticket (HTTP {status})")]
-    MissingTicket {
-        /// Mã trạng thái của phản hồi.
-        status: u16,
-    },
+    MissingTicket { status: u16 },
 
-    /// Sai tên đăng nhập hoặc mật khẩu.
     #[error("sai tên đăng nhập hoặc mật khẩu")]
     InvalidCredentials,
 
-    /// Roblox đòi giải captcha — chỉ trình duyệt mới qua được.
     #[error("Roblox yêu cầu giải captcha")]
-    CaptchaRequired {
-        /// Mã thách thức, nếu Roblox gửi kèm.
-        challenge_id: Option<String>,
-    },
+    CaptchaRequired { challenge_id: Option<String> },
 
-    /// Roblox đòi xác thực hai bước.
     #[error("Roblox yêu cầu xác thực hai bước")]
-    TwoFactorRequired {
-        /// Mã thách thức, nếu Roblox gửi kèm.
-        challenge_id: Option<String>,
-    },
+    TwoFactorRequired { challenge_id: Option<String> },
 
-    /// Bị giới hạn tần suất.
     #[error("bị giới hạn tần suất gọi API")]
-    RateLimited {
-        /// Số giây nên chờ, nếu Roblox gửi header `Retry-After`.
-        retry_after_seconds: Option<u64>,
-    },
+    RateLimited { retry_after_seconds: Option<u64> },
 
-    /// Tài khoản bị khoá hoặc vô hiệu.
     #[error("tài khoản bị khoá")]
     AccountLocked,
 
-    /// Bị từ chối vì lý do khác — kèm thông báo gốc để còn chẩn đoán.
     #[error("đăng nhập bị từ chối: HTTP {status} — {message}")]
-    LoginRejected {
-        /// Mã trạng thái.
-        status: u16,
-        /// Thông báo Roblox trả về; dùng câu thay thế khi không đọc được.
-        message: String,
-    },
+    LoginRejected { status: u16, message: String },
 }
 
-/// Client gọi các endpoint xác thực của Roblox.
 #[derive(Debug, Clone)]
 pub struct AuthClient<T> {
     transport: T,
@@ -135,7 +60,6 @@ pub struct AuthClient<T> {
 }
 
 impl<T: Transport> AuthClient<T> {
-    /// Dùng địa chỉ mặc định của Roblox.
     pub fn new(transport: T) -> Self {
         Self {
             transport,
@@ -143,7 +67,6 @@ impl<T: Transport> AuthClient<T> {
         }
     }
 
-    /// Dùng địa chỉ tuỳ chỉnh.
     pub fn with_endpoints(transport: T, endpoints: Endpoints) -> Self {
         Self {
             transport,
@@ -151,27 +74,11 @@ impl<T: Transport> AuthClient<T> {
         }
     }
 
-    /// Xin một CSRF token cho phiên gắn với `cookie`.
-    ///
-    /// Không kiểm tra mã trạng thái: Roblox trả `403` kèm token khi bị từ chối, nhưng một số
-    /// endpoint trả token kèm `200`. Điều kiện thật sự cần là **có header**.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AuthError::MissingCsrfToken`] nếu phản hồi không kèm token,
-    /// [`AuthError::Transport`] nếu không gọi được.
     pub fn csrf_token(&self, cookie: &str) -> Result<String, AuthError> {
         let response = self.transport.execute(&self.ticket_request(cookie, None))?;
         extract_csrf_token(&response)
     }
 
-    /// Đổi `cookie` lấy auth ticket.
-    ///
-    /// Gồm hai lời gọi: xin CSRF rồi gọi lại kèm token.
-    ///
-    /// # Errors
-    ///
-    /// Trả [`AuthError::MissingTicket`] nếu Roblox không trả ticket.
     pub fn auth_ticket(&self, cookie: &str) -> Result<Zeroizing<String>, AuthError> {
         let csrf = self.csrf_token(cookie)?;
         let response = self
@@ -187,17 +94,10 @@ impl<T: Transport> AuthClient<T> {
             })
     }
 
-    /// Đăng nhập bằng tên đăng nhập và mật khẩu, trả về cookie `.ROBLOSECURITY`.
-    ///
-    /// # Errors
-    ///
-    /// Trả một biến thể của [`AuthError`] đã phân loại — xem [`classify_login_failure`].
     pub fn login(&self, username: &str, password: &str) -> Result<Zeroizing<String>, AuthError> {
-        // Bước 1: xin CSRF cho phiên ẩn danh. Dùng đúng endpoint mà RAM dùng để lấy token.
         let bootstrap = self.transport.execute(&self.ticket_request("", None))?;
         let csrf = extract_csrf_token(&bootstrap)?;
 
-        // Bước 2: gửi thông tin đăng nhập.
         let body = login_body(username, password);
         let request = HttpRequest::new(HttpMethod::Post, join(&self.endpoints.auth, "v2/login"))
             .with_header("Content-Type", "application/json")
@@ -237,7 +137,6 @@ impl<T: Transport> AuthClient<T> {
     }
 }
 
-/// Nối một đường dẫn vào địa chỉ gốc, đảm bảo đúng một dấu `/`.
 #[must_use]
 pub fn join(base: &str, path: &str) -> String {
     format!(
@@ -247,10 +146,6 @@ pub fn join(base: &str, path: &str) -> String {
     )
 }
 
-/// Thân yêu cầu đăng nhập, đúng hình dạng `docs/BROWSER.md` mục 4 ghi lại.
-///
-/// Hai khoá `ctype` (giá trị `Username`) và `password` đã xác nhận từ `AccountBrowser.cs:309-312`;
-/// tên khoá chứa tên đăng nhập là `cvalue`.
 #[must_use]
 pub fn login_body(username: &str, password: &str) -> Vec<u8> {
     let body = serde_json::json!({
@@ -261,11 +156,6 @@ pub fn login_body(username: &str, password: &str) -> Vec<u8> {
     body.to_string().into_bytes()
 }
 
-/// Rút token CSRF khỏi header phản hồi.
-///
-/// # Errors
-///
-/// Trả [`AuthError::MissingCsrfToken`] nếu không có hoặc rỗng.
 pub fn extract_csrf_token(response: &HttpResponse) -> Result<String, AuthError> {
     response
         .header("x-csrf-token")
@@ -276,10 +166,6 @@ pub fn extract_csrf_token(response: &HttpResponse) -> Result<String, AuthError> 
         })
 }
 
-/// Rút cookie `.ROBLOSECURITY` khỏi các header `Set-Cookie`.
-///
-/// Roblox có thể gửi nhiều `Set-Cookie` trong một phản hồi, và giá trị cookie có kèm thuộc tính
-/// (`Path`, `Secure`, …) sau dấu `;`. Hàm này chỉ lấy đúng cặp tên=giá trị của cookie cần.
 #[must_use]
 pub fn roblosecurity_from_set_cookie(headers: &[(String, String)]) -> Option<String> {
     for (name, value) in headers {
@@ -301,14 +187,6 @@ pub fn roblosecurity_from_set_cookie(headers: &[(String, String)]) -> Option<Str
     None
 }
 
-/// Phân loại một lần đăng nhập thất bại thành lỗi có nghĩa.
-///
-/// Đọc nhiều dấu hiệu cùng lúc vì Roblox không có một quy ước duy nhất:
-///
-/// 1. `429` → giới hạn tần suất (kèm `Retry-After` nếu có).
-/// 2. Header `rblx-challenge-type` → `twostepverification` hoặc `captcha`.
-/// 3. Thông báo trong `errors[0].message` → sai thông tin, captcha, hai bước, khoá tài khoản.
-/// 4. Không nhận ra → giữ nguyên thông báo gốc để người dùng còn thấy lý do thật.
 #[must_use]
 pub fn classify_login_failure(response: &HttpResponse) -> AuthError {
     if response.status == 429 {
@@ -357,10 +235,8 @@ pub fn classify_login_failure(response: &HttpResponse) -> AuthError {
     }
 }
 
-/// Câu thay thế khi Roblox từ chối mà không kèm thông báo đọc được.
 pub const NO_MESSAGE: &str = "(Roblox không kèm thông báo)";
 
-/// Lấy thông báo lỗi đầu tiên từ thân phản hồi dạng `{"errors":[{"message":"..."}]}`.
 #[must_use]
 pub fn first_error_message(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -380,7 +256,6 @@ mod tests {
 
     use super::*;
 
-    /// Transport trả về kịch bản dựng sẵn và ghi lại yêu cầu đã nhận.
     #[derive(Default)]
     struct Scripted {
         responses: RefCell<VecDeque<HttpResponse>>,
@@ -414,8 +289,6 @@ mod tests {
         AuthClient::new(script)
     }
 
-    // ---------------------------------------------------------------- url join
-
     #[test]
     fn joining_a_path_never_doubles_or_drops_the_slash() {
         assert_eq!(
@@ -428,8 +301,6 @@ mod tests {
         );
     }
 
-    // ---------------------------------------------------------------- login body
-
     #[test]
     fn the_login_body_uses_the_keys_from_rams_browser_flow() {
         let body = login_body("alice", "s3cret");
@@ -439,8 +310,6 @@ mod tests {
         assert_eq!(value["cvalue"], "alice");
         assert_eq!(value["password"], "s3cret");
     }
-
-    // ---------------------------------------------------------------- csrf + ticket
 
     #[test]
     fn a_csrf_token_is_read_from_the_forbidden_response() {
@@ -507,8 +376,6 @@ mod tests {
         assert_eq!(error, AuthError::MissingTicket { status: 200 });
     }
 
-    // ---------------------------------------------------------------- login success
-
     #[test]
     fn a_successful_login_returns_the_security_cookie() {
         let script = Scripted::new(vec![
@@ -557,8 +424,6 @@ mod tests {
         ));
     }
 
-    // ---------------------------------------------------------------- cookie parsing
-
     #[test]
     fn a_security_cookie_is_found_among_several_set_cookie_headers() {
         let headers = vec![
@@ -591,8 +456,6 @@ mod tests {
         )];
         assert_eq!(roblosecurity_from_set_cookie(&headers), None);
     }
-
-    // ---------------------------------------------------------------- classification
 
     fn json_body(text: &str) -> Vec<u8> {
         text.as_bytes().to_vec()
@@ -707,7 +570,6 @@ mod tests {
 
     #[test]
     fn a_transport_failure_propagates_instead_of_being_misread_as_a_rejection() {
-        // Hết kịch bản -> TransportError, KHONG duoc thanh LoginRejected.
         let script = Scripted::new(vec![]);
         let error = client(&script).login("alice", "pw").expect_err("phải lỗi");
         assert!(matches!(error, AuthError::Transport(_)), "gặp: {error:?}");

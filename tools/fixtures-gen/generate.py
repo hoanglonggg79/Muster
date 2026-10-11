@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Sinh test vector cho core::vault  (ROADMAP buoc 0.1).
 
@@ -31,7 +30,6 @@ import os
 import secrets
 import sys
 
-# ---------------------------------------------------------------- hang so da xac minh
 
 RAM_HEADER = bytes(
     [82, 111, 98, 108, 111, 120, 32, 65, 99, 99, 111, 117, 110, 116, 32, 77, 97, 110, 97, 103,
@@ -42,7 +40,6 @@ RAM_HEADER = bytes(
 assert len(RAM_HEADER) == 64, len(RAM_HEADER)
 assert RAM_HEADER.startswith(b"Roblox Account Manager created by ic3w0lf22 @ github.com")
 
-# AccountManager.cs:93  -- 56 byte, giu nguyen loi chinh ta "BUY"
 DPAPI_ENTROPY = bytes(
     [0x52, 0x4f, 0x42, 0x4c, 0x4f, 0x58, 0x20, 0x41, 0x43, 0x43, 0x4f, 0x55, 0x4e, 0x54, 0x20,
      0x4d, 0x41, 0x4e, 0x41, 0x47, 0x45, 0x52, 0x20, 0x7c, 0x20, 0x3a, 0x29, 0x20, 0x7c, 0x20,
@@ -60,7 +57,7 @@ SALT_LEN = 16
 NONCE_LEN = 24
 KEY_LEN = 32
 
-FIXTURE_PASSWORD = "ram-fixture-password"  # chi la du lieu tong hop, khong phai bi mat that
+FIXTURE_PASSWORD = "ram-fixture-password"
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x1
 CRYPTPROTECT_LOCAL_MACHINE = 0x4
@@ -69,7 +66,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT_DIR = os.path.join(ROOT, "crates", "muster-core", "tests", "fixtures")
 
 
-# ---------------------------------------------------------------- payload mau
 
 def build_payload() -> bytes:
     """JSON gia lap theo dung hinh dang `JsonConvert.SerializeObject(List<Account>)`.
@@ -114,7 +110,6 @@ def build_payload() -> bytes:
     return json.dumps(accounts, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-# ---------------------------------------------------------------- nhanh 1
 
 def derive_key(password: str, salt: bytes) -> bytes:
     from argon2.low_level import Type, hash_secret_raw
@@ -142,7 +137,6 @@ def make_password_locked(payload: bytes, password: str) -> tuple[bytes, bytes, b
     return blob, salt, nonce
 
 
-# ---------------------------------------------------------------- nhanh 2/3
 
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [("cbData", wt.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
@@ -200,7 +194,6 @@ def make_dpapi_unprotect(blob: bytes, local_machine: bool) -> bytes:
         kernel32.LocalFree(blob_out.pbData)
 
 
-# ---------------------------------------------------------------- main
 
 def main() -> int:
     if sys.platform.startswith("win"):
@@ -228,7 +221,6 @@ def main() -> int:
         "fixtures": [],
     }
 
-    # nhanh 4
     p = os.path.join(OUT_DIR, "accountdata.plain.json")
     with open(p, "wb") as f:
         f.write(payload)
@@ -238,7 +230,6 @@ def main() -> int:
     )
     print("[4/4] plain JSON          ->", os.path.basename(p), len(payload), "byte")
 
-    # nhanh 1
     blob, salt, nonce = make_password_locked(payload, FIXTURE_PASSWORD)
     p = os.path.join(OUT_DIR, "accountdata.password-locked.bin")
     with open(p, "wb") as f:
@@ -251,7 +242,6 @@ def main() -> int:
     )
     print("[1/4] password-locked     ->", os.path.basename(p), len(blob), "byte")
 
-    # nhanh 2 / 3
     for branch, local_machine, fname in (
         (2, False, "accountdata.dpapi-currentuser.bin"),
         (3, True, "accountdata.dpapi-localmachine.bin"),
@@ -276,7 +266,6 @@ def main() -> int:
         print(f"[{branch}/4] DPAPI {'LocalMachine' if local_machine else 'CurrentUser':13} ->",
               fname, len(blob), "byte")
 
-    # self-check: giai ma lai va doi chieu
     print("\nself-check:")
     ok = True
 

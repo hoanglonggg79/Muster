@@ -3,7 +3,7 @@ import hashlib
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LIB = os.path.join(HERE, "libsodium-64.dll")   # libsodium 1.0.11 (x64) from libsodium-net 0.10.0
+LIB = os.path.join(HERE, "libsodium-64.dll")
 
 s = ctypes.CDLL(LIB)
 s.sodium_init()
@@ -13,14 +13,14 @@ print("sodium_library_version_minor =", s.sodium_library_version_minor())
 
 s.crypto_pwhash.restype = ctypes.c_int
 s.crypto_pwhash.argtypes = [
-    ctypes.c_char_p,               # out
-    ctypes.c_ulonglong,            # outlen
-    ctypes.c_char_p,               # passwd
-    ctypes.c_ulonglong,            # passwdlen
-    ctypes.c_char_p,               # salt
-    ctypes.c_ulonglong,            # opslimit
-    ctypes.c_size_t,               # memlimit
-    ctypes.c_int,                  # alg
+    ctypes.c_char_p,
+    ctypes.c_ulonglong,
+    ctypes.c_char_p,
+    ctypes.c_ulonglong,
+    ctypes.c_char_p,
+    ctypes.c_ulonglong,
+    ctypes.c_size_t,
+    ctypes.c_int,
 ]
 
 ALG_ARGON2I13 = 1
@@ -28,7 +28,6 @@ ALG_ARGON2I13 = 1
 PASSWORD = b"correct horse battery staple"
 SALT = bytes(range(16))
 
-# RAM: Argon2 input is SHA-512(password), 64 bytes  (CryptoHash.Hash)
 pw = hashlib.sha512(PASSWORD).digest()
 print("sha512(pw) len =", len(pw), pw.hex()[:32], "...")
 

@@ -140,6 +140,20 @@ muster/
 | i18n | `i18next`, `react-i18next` |
 | Chart | `recharts` |
 
+### 3.4 Quy ước code
+
+> **Just code, don't comment.** (chốt 2026-10-11)
+
+- **Không viết comment trong mã nguồn.** Không `//`, không `///`, không `//!`, không `/* */` — ở
+  mọi ngôn ngữ trong repo (Rust, TypeScript, Python, shell).
+- **Tri thức kiểm chứng được không nằm trong code.** Mọi sự thật về hành vi của RAM — kể cả những
+  chỗ cố tình giữ nguyên lỗi của nó — thuộc về `ROADMAP.md` (xem mục 4.5) hoặc `docs/`. Code chỉ
+  còn lại cơ chế; lý do nằm ở tài liệu.
+- **Ngoại lệ duy nhất:** chỉ thị của công cụ, không phải comment — shebang trong script
+  (`#!/usr/bin/env bash`) và triple-slash directive trong TypeScript
+  (`/// <reference types="..." />`). `bindings.ts` là file sinh tự động, không sửa tay.
+- Đặt tên và cấu trúc phải tự nói lên ý định, vì không còn comment để bù.
+
 ---
 
 ## 4. Hợp đồng tương thích ngược
@@ -348,6 +362,30 @@ khi ghi bất cứ thứ gì.
   khoá** trải trên **6 section** (`General`, `Developer`, `WebServer`, `AccountControl`, `Watcher`,
   `Prompts`). Migration đọc hết; mọi khoá/section không mô hình hoá được vẫn giữ nguyên trong
   catch-all nên không mất dữ liệu.
+
+### 4.5 Chi tiết hành vi đã kiểm chứng
+
+Quy ước từ 2026-10-11: **code không viết comment**. Vì vậy các sự thật đã kiểm chứng dưới đây —
+trước nằm rải trong comment của mã nguồn — được ghi lại tập trung ở đây. Đây là nguồn tham chiếu
+duy nhất cho chúng; đặc biệt đừng "sửa cho đẹp" những chỗ cố tình giữ nguyên hành vi (kể cả lỗi)
+của RAM.
+
+| Chủ đề | Sự thật đã kiểm chứng |
+| :--- | :--- |
+| Mở game — chế độ legacy | `Account.cs:636` **luôn** nối `&gameId=` kể cả khi `JobId` rỗng. Đây là lỗi của RAM; giữ nguyên vì tương thích ngược. |
+| Mở game — URL hiện đại | Chỉ nhánh `Game` gửi `browserTrackerId` **bên trong** `placelauncherurl`; hai nhánh `RequestPrivateGame` và `RequestFollowUser` thì không. Cờ `isTeleport=true` luôn đặt sau cùng. |
+| `HttpUtility.UrlEncode` | Ngữ nghĩa .NET **Framework**: dấu cách → `+`, **hex viết thường** (`%3a`), nhóm không mã hoá `- _ . ! * ( )`. .NET Core đổi sang hex HOA — đừng tra nhầm phiên bản. |
+| `BrowserTrackerID` | `Account.cs:509-511`: ghép hai số thập phân — số đầu trong `[100000, 175000)`, số sau trong `[100000, 900000)` — cho ra chuỗi 12 chữ số. |
+| Multi-instance | Cần **đủ hai thứ**: giữ handle tới named mutex `ROBLOX_singletonMutex` (`CreateMutexW` với `bInitialOwner = FALSE`) **và** cờ `-b <tracker>` riêng cho mỗi client. |
+| `AutoCloseLastProcess` | `Account.cs:523-547`: `close → chờ 250 ms → close → chờ 250 ms → kill`. Đóng cửa sổ hai lần để Roblox kịp ngắt kết nối; thiếu bước này hay gặp *Same account launched*. Chỉ đóng client khớp `-b`; tiến trình không có `-b` phải bỏ qua, vì khớp nhầm sẽ làm client đang chạy bị đá. |
+| `patch` — thư mục version | `ClientSettingsPatcher.cs:19-20` kiểm tra tên bắt đầu bằng `version-` **và** có `RobloxPlayerLauncher.exe` (thông báo lỗi của RAM ghi nhầm thành `RobloxPlayerBeta.exe`). |
+| `patch` — `DefaultIcon` | Giá trị registry thường ở dạng `"...\RobloxPlayerBeta.exe",0`. RAM dùng thẳng nên hỏng im lặng; bản port cắt `,<index>` trước rồi mới bỏ ngoặc kép. |
+| `patch` — FPS | Mặc định `MaxFPSValue` là **120** (`AccountManager.cs:147`), nhưng patcher dùng **240** khi không đọc được khoá (`ClientSettingsPatcher.cs:35,39`). Giữ cả hai con số. |
+| `auth` | CSRF lấy bằng cách cố tình gọi để bị `403` rồi đọc header `x-csrf-token`; ticket nằm ở header `rbx-authentication-ticket`; login là `POST auth.roblox.com/v2/login` với body `{ctype:"Username", cvalue, password}`. `Referer` là `https://www.roblox.com/games/4924922222/Brookhaven-RP` (`Account.cs:118`). |
+| Thời gian Json.NET | `yyyy-MM-ddTHH:mm:ss.FFFFFFF`, cắt số 0 thừa, **không** hậu tố múi giờ. ⚠️ Chuyện Json.NET có nối `K` (`+07:00`) cho `DateTimeKind.Local` hay không **chưa xác minh** — cần một `AccountData.json` do RAM thật ghi ra. |
+| `roblox::account::add` | Gộp theo `UserID` và chỉ cập nhật **ba** field: cookie, mật khẩu, `LastUse` (`AccountManager.cs:583-585`). `Alias` / `Description` / `Group` / `Fields` là của người dùng, không được đụng. Không gộp khi `user_id == 0`. |
+| `roblox::http` | Trait `Transport` **đồng bộ**; adapter `reqwest` nằm sau feature `http-reqwest` (giống cách `specta` được gate). Tên header HTTP không phân biệt hoa thường. |
+| `classify_login_failure` | ⚠️ Hình dạng phản hồi của Roblox (header `rblx-challenge-type`, `errors[].message`) **chưa đối chiếu thật**. Hàm đọc nhiều dấu hiệu cùng lúc; cần một lần chạy thật để chốt. |
 
 ---
 

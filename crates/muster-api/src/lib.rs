@@ -1,40 +1,18 @@
-//! # Muster local API
-//!
-//! Tái lập local HTTP API của Roblox Account Manager: **22 route** cộng `/Running` và
-//! `/favicon.ico`. Hợp đồng đầy đủ ở `ROADMAP.md` mục 4.2.
-//!
-//! Trạng thái: mới có khung. Hai route phụ đã xong, 22 route chính thuộc M2.
-//!
-//! ## Quy ước phải giữ
-//!
-//! - Cổng mặc định **7963** (setting `WebServerPort`).
-//! - Mặc định chỉ nghe `localhost`. Chỉ bind rộng khi người dùng bật `AllowExternalConnections`
-//!   (nguyên tắc bất biến #8).
-//! - Nhánh `/v2/<Method>` trả JSON `{"Success": bool, "Message": string}`.
-//! - Nhánh `/v1/<Method>` trả text thô, mã lỗi nằm ở header `ws-error`.
-//! - HTTP status: thành công 200, lỗi 400, sai quyền 401.
-
 use axum::Router;
 use axum::routing::get;
 
-/// Cổng mặc định, khớp setting `WebServerPort` của RAM.
 pub const DEFAULT_PORT: u16 = 7963;
 
-/// Dựng router của local API.
-///
-/// Chưa có 22 route chính — chúng cần `core::roblox::account` và lớp xác thực của M1/M2.
 pub fn router() -> Router {
     Router::new()
         .route("/Running", get(running))
         .route("/favicon.ico", get(favicon))
 }
 
-/// `GET /Running` — RAM trả về **text thô** `true`, không phải JSON.
 async fn running() -> &'static str {
     "true"
 }
 
-/// `GET /favicon.ico` — RAM trả về rỗng.
 async fn favicon() -> &'static str {
     ""
 }

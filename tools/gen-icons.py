@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Sinh icon placeholder cho Muster  (tools/gen-icons.py).
 
@@ -20,10 +19,9 @@ import struct
 import sys
 import zlib
 
-# ---------------------------------------------------------------- mau
 
-BG = (15, 110, 86, 255)  # teal 600
-FG = (159, 225, 203, 255)  # teal 100
+BG = (15, 110, 86, 255)
+FG = (159, 225, 203, 255)
 SUPERSAMPLE = 4
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -39,7 +37,6 @@ def find_icons_dir() -> str:
     raise SystemExit("khong tim thay crates/*/src-tauri/")
 
 
-# ---------------------------------------------------------------- hinh hoc
 
 def rounded_rect_hit(x: float, y: float, w: float, h: float, r: float,
                      px: float, py: float) -> bool:
@@ -68,7 +65,6 @@ def render(size: int) -> list[list[tuple[int, int, int, int]]]:
     top = (s - total_h) / 2
 
     bars = [(bar_x, top + i * (bar_h + gap)) for i in range(3)]
-    # Thanh thu ba ngan hon — trong nhu mot danh sach.
     bar_widths = [bar_w, bar_w, bar_w * 0.62]
 
     for sy in range(s):
@@ -94,7 +90,6 @@ def render(size: int) -> list[list[tuple[int, int, int, int]]]:
     return rows
 
 
-# ---------------------------------------------------------------- ghi PNG
 
 def png_bytes(rows: list[list[tuple[int, int, int, int]]]) -> bytes:
     height = len(rows)
@@ -102,7 +97,7 @@ def png_bytes(rows: list[list[tuple[int, int, int, int]]]) -> bytes:
 
     raw = bytearray()
     for row in rows:
-        raw.append(0)  # filter type 0
+        raw.append(0)
         for (r, g, b, a) in row:
             raw += bytes((r, g, b, a))
 
@@ -123,7 +118,6 @@ def png_bytes(rows: list[list[tuple[int, int, int, int]]]) -> bytes:
     )
 
 
-# ---------------------------------------------------------------- ghi ICO
 
 def ico_bytes(sizes: list[int]) -> bytes:
     images = [png_bytes(render(s)) for s in sizes]
@@ -142,7 +136,6 @@ def ico_bytes(sizes: list[int]) -> bytes:
     return header + bytes(entries) + b"".join(images)
 
 
-# ---------------------------------------------------------------- main
 
 def main() -> int:
     out_dir = find_icons_dir()

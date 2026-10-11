@@ -1,119 +1,53 @@
-//! # `models` — hình dạng dữ liệu dùng chung
-//!
-//! [`Account`] là bản sao trung thực của `Classes/Account.cs` trong `RAM_Source/` ở **góc nhìn
-//! serialization**: đúng những field mà Json.NET ghi ra `AccountData.json`, đúng tên, đúng kiểu.
-//!
-//! Đây là **hợp đồng giữa ba phía**: `core::vault` (đọc/ghi file), `muster-cli` (báo cáo nhập),
-//! và nhánh UI (qua `tauri-specta`). Vì vậy nó nằm ở module riêng chứ không nằm trong `vault`.
-//!
-//! ## Vì sao không dùng kiểu ngày tháng có cấu trúc
-//!
-//! `LastUse` và `LastAttemptedRefresh` là `DateTime` trong C#, nhưng Json.NET ghi ra với
-//! **độ chính xác biến đổi** (`yyyy-MM-ddTHH:mm:ss.FFFFFFF`, cắt số 0 thừa ở cuối). Mô hình hoá
-//! lại bằng `chrono` sẽ phải tái lập đúng quy tắc cắt đó, và chỉ cần lệch một chữ số là file ghi
-//! ra không còn giống định dạng RAM nữa. Nguyên tắc bất biến #2 nói tương thích ngược quan trọng
-//! hơn vẻ đẹp của code, nên ở M0 hai field này giữ nguyên dạng chuỗi — round-trip là lossless
-//! tuyệt đối. Việc chuyển sang kiểu có cấu trúc để lại cho M1, khi có nhu cầu sắp xếp theo thời gian.
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Một tài khoản, khớp `RBX_Alt_Manager.Account`.
-///
-/// Mọi field đều có `#[serde(default)]` để một file bị sửa tay hoặc thiếu field vẫn đọc được
-/// thay vì làm hỏng cả lần nhập.
-///
-/// Các field `[JsonIgnore]` của bản C# (`PinUnlocked`, `TokenSet`, `LastAppLaunch`, `CSRFToken`,
-/// `Presence`) **không** có mặt ở đây — chúng không bao giờ được ghi xuống đĩa.
-///
-/// `Debug` được viết tay chứ không derive: `security_token` và `password` là secret, in ra log
-/// là rò rỉ (nguyên tắc bất biến #4).
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Account {
-    /// Cờ "tài khoản còn dùng được". `Account.Valid`.
     #[serde(rename = "Valid", default)]
     pub valid: bool,
 
-    /// Cookie `.ROBLOSECURITY`. **Là secret** — không bao giờ được ghi vào log.
     #[serde(rename = "SecurityToken", default)]
     pub security_token: Option<String>,
 
-    /// Tên đăng nhập Roblox. `Account.Username`.
     #[serde(rename = "Username", default)]
     pub username: Option<String>,
 
-    /// Thời điểm dùng lần cuối. Chuỗi ISO 8601 do Json.NET sinh ra — xem ghi chú đầu module.
     #[serde(rename = "LastUse", default)]
     pub last_use: String,
 
-    /// Tên hiển thị do người dùng đặt. Tối đa 50 ký tự theo `Account.cs:56`.
     #[serde(rename = "Alias", default)]
     pub alias: String,
 
-    /// Ghi chú tự do. Tối đa 5000 ký tự theo `Account.cs:69`.
     #[serde(rename = "Description", default)]
     pub description: String,
 
-    /// Mật khẩu đăng nhập, nếu người dùng bật `SavePasswords`. **Là secret**.
     #[serde(rename = "Password", default)]
     pub password: String,
 
-    /// Nhóm để lọc và sắp xếp.
-    ///
-    /// `Account.cs:29` khai báo `[JsonProperty(NullValueHandling = NullValueHandling.Ignore)]`
-    /// với giá trị mặc định `"Default"` — nghĩa là khi `null` thì **field bị bỏ hẳn khỏi JSON**.
-    /// `Option` + `skip_serializing_if` tái lập đúng hành vi đó.
     #[serde(rename = "Group", default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
 
-    /// UserID Roblox. `long` trong C#.
-    ///
-    /// Khai `i64` cho khớp `long` của RAM, nhưng khi xuất sang TypeScript thì khai đè thành
-    /// `number` (qua `f64`): `serde_json` gửi field này qua IPC dưới dạng **số JSON**, nên `number`
-    /// mới là kiểu đúng ở phía nhận. `specta` mặc định từ chối xuất `i64` sang TypeScript vì sợ
-    /// mất chính xác, nên phải khai đè tường minh.
-    ///
-    /// Đánh đổi: `number` của JS chính xác tới 2^53 ≈ 9,0×10^15, còn UserID của Roblox hiện ở mức
-    /// hàng tỉ — cách ngưỡng đó hơn năm bậc độ lớn. Nếu một ngày vượt ngưỡng thì phải đổi cả cách
-    /// serialize lẫn kiểu TypeScript, không chỉ đổi mỗi dòng này.
     #[serde(rename = "UserID", default)]
     #[cfg_attr(feature = "specta", specta(type = f64))]
     pub user_id: i64,
 
-    /// Túi field tuỳ ý. RAM lưu vị trí cửa sổ ở đây
-    /// (`Window_Position_X/Y`, `Window_Width/Height`) cùng mọi field người dùng tự thêm.
-    ///
-    /// **Phải giữ nguyên vẹn** — mất túi này là mất dữ liệu người dùng (nguyên tắc bất biến #2).
     #[serde(rename = "Fields", default)]
     pub fields: BTreeMap<String, String>,
 
-    /// Lần cuối thử refresh cookie. Chuỗi ISO 8601, xem ghi chú đầu module.
     #[serde(rename = "LastAttemptedRefresh", default)]
     pub last_attempted_refresh: String,
 
-    /// ID dùng cho cờ `-b` khi mở nhiều instance. `Account.cs:50`.
     #[serde(rename = "BrowserTrackerID", default)]
     pub browser_tracker_id: Option<String>,
 
-    /// Mọi khoá JSON không nằm trong danh sách trên.
-    ///
-    /// RAM bản hiện tại không ghi field lạ, nhưng một bản RAM khác hoặc một công cụ bên thứ ba có
-    /// thể ghi thêm. Giữ lại thay vì nuốt mất — cùng lý do với [`Account::fields`].
-    ///
-    /// Không xuất sang TypeScript: đây là túi chứa dữ liệu chưa biết hình dạng, UI không thể dùng
-    /// và cũng không nên dùng. Vẫn được giữ nguyên khi ghi lại xuống đĩa.
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
     #[cfg_attr(feature = "specta", specta(skip))]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl std::fmt::Debug for Account {
-    /// Bản `Debug` đã khử secret.
-    ///
-    /// Chỉ hiện sự **tồn tại** của cookie/mật khẩu, không hiện giá trị. Nhờ vậy
-    /// `tracing::debug!(?account)` an toàn, và test redaction ở bước 0.8 có cái để bám vào.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Account")
             .field("valid", &self.valid)
@@ -139,7 +73,6 @@ impl std::fmt::Debug for Account {
 }
 
 impl Account {
-    /// Tên để hiển thị: `Alias` nếu có, ngược lại là `Username`.
     #[must_use]
     pub fn display_name(&self) -> &str {
         if self.alias.is_empty() {
@@ -149,13 +82,11 @@ impl Account {
         }
     }
 
-    /// Nhóm của tài khoản, đã áp dụng giá trị mặc định `"Default"` của RAM.
     #[must_use]
     pub fn group_or_default(&self) -> &str {
         self.group.as_deref().unwrap_or("Default")
     }
 
-    /// Cookie `.ROBLOSECURITY`, nếu có. Trả `None` khi field vắng hoặc rỗng.
     #[must_use]
     pub fn cookie(&self) -> Option<&str> {
         self.security_token
@@ -163,21 +94,15 @@ impl Account {
             .filter(|token| !token.is_empty())
     }
 
-    /// Đọc một field tuỳ ý trong túi [`Account::fields`]. `Account.cs:828`.
-    ///
-    /// Trả `""` khi field vắng — đúng hành vi `GetField` của RAM, nhờ vậy chỗ gọi không phải
-    /// phân biệt "vắng" với "rỗng".
     #[must_use]
     pub fn get_field(&self, name: &str) -> &str {
         self.fields.get(name).map_or("", String::as_str)
     }
 
-    /// Ghi một field tuỳ ý. `Account.cs:829`.
     pub fn set_field(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.fields.insert(name.into(), value.into());
     }
 
-    /// Xoá một field tuỳ ý, trả giá trị cũ nếu có. `Account.cs:830`.
     pub fn remove_field(&mut self, name: &str) -> Option<String> {
         self.fields.remove(name)
     }

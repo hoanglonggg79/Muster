@@ -1,121 +1,54 @@
-//! # `patch` — ghi `ClientAppSettings.json` cho client Roblox
-//!
-//! Tái lập `Classes/ClientSettingsPatcher.cs`. Mục đích: đặt các khoá tinh chỉnh của client —
-//! phổ biến nhất là mở khoá FPS (`DFIntTaskSchedulerTargetFps`) — bằng cách ghi một file JSON vào
-//! thư mục `ClientSettings` của **version Roblox đang cài**.
-//!
-//! ## Vì sao việc này nằm ngoài "out-of-process"
-//!
-//! Ghi `ClientSettings` là đọc/ghi **file cấu hình trên đĩa**, không phải inject hay patch memory.
-//! `ROADMAP.md` mục 2 liệt nó vào đúng nhóm được phép. Đây cũng là cách duy nhất để đổi FPS mà
-//! không chạm vào tiến trình.
-//!
-//! ## Ba bước, và bước nào cũng có thể thất bại im lặng
-//!
-//! 1. **Tìm thư mục version.** Đọc `HKEY_CLASSES_ROOT\roblox\DefaultIcon`, lấy đường dẫn
-//!    `RobloxPlayerBeta.exe`, rồi lên một cấp (`ClientSettingsPatcher.cs:13-16`).
-//! 2. **Kiểm tra thư mục hợp lệ.** Tên phải bắt đầu bằng `version-` **và** phải có
-//!    `RobloxPlayerLauncher.exe` (`ClientSettingsPatcher.cs:19-20`).
-//! 3. **Ghi file.** Ưu tiên file tuỳ biến nếu người dùng đặt `CustomClientSettings`; nếu không thì
-//!    chỉ ghi khi `UnlockFPS` bật (`ClientSettingsPatcher.cs:29-40`).
-//!
-//! Mỗi bước RAM đều chỉ ghi log rồi `return` — không có lỗi nào nổi lên UI. Ở đây mỗi bước trả một
-//! lỗi có kiểu, để chỗ gọi quyết định có báo cho người dùng hay không.
-
 use std::path::{Path, PathBuf};
 
-/// Tên thư mục con chứa cấu hình client.
 pub const CLIENT_SETTINGS_DIR: &str = "ClientSettings";
 
-/// Tên file cấu hình client.
 pub const CLIENT_APP_SETTINGS_FILE: &str = "ClientAppSettings.json";
 
-/// File đánh dấu một thư mục là version Roblox hợp lệ.
-///
-/// ⚠️ `ClientSettingsPatcher.cs:20` kiểm tra `RobloxPlayerLauncher.exe` nhưng thông báo lỗi của nó
-/// lại ghi "RobloxPlayerBeta.exe not found". Ta kiểm tra đúng **file mà nó thật sự kiểm tra**.
 pub const VERSION_MARKER_EXE: &str = "RobloxPlayerLauncher.exe";
 
-/// Tiền tố bắt buộc của tên thư mục version.
 pub const VERSION_FOLDER_PREFIX: &str = "version-";
 
-/// Khoá JSON điều khiển giới hạn FPS của client.
 pub const FPS_KEY: &str = "DFIntTaskSchedulerTargetFps";
 
-/// Giá trị FPS RAM dùng khi không đọc được `MaxFPSValue`.
-///
-/// `ClientSettingsPatcher.cs:35` và `:39` đều lấy `240` làm mặc định, khác với mặc định `120` của
-/// chính setting `MaxFPSValue` (`AccountManager.cs:147`). Giữ đúng cả hai con số.
 pub const DEFAULT_UNLOCK_FPS: u32 = 240;
 
-/// Lỗi của lớp `patch`.
 #[derive(Debug, thiserror::Error)]
 pub enum PatchError {
-    /// Không đọc được giá trị trong registry.
     #[cfg(windows)]
     #[error("không đọc được registry {subkey} (mã lỗi Win32 {code})")]
-    Registry {
-        /// Đường dẫn khoá con đã đọc.
-        subkey: &'static str,
-        /// Mã lỗi Win32.
-        code: u32,
-    },
+    Registry { subkey: &'static str, code: u32 },
 
-    /// Giá trị `DefaultIcon` không suy ra được thư mục nào.
     #[error("giá trị DefaultIcon của giao thức roblox không phải đường dẫn hợp lệ: {0:?}")]
     BadDefaultIcon(String),
 
-    /// Thư mục version không tồn tại, không bắt đầu bằng `version-`, hoặc thiếu file đánh dấu.
     #[error("không phải thư mục version Roblox hợp lệ: {0}")]
     NotAVersionFolder(PathBuf),
 
-    /// Lỗi đọc/ghi file.
     #[error("lỗi vào/ra tại {path}: {source}")]
     Io {
-        /// Đường dẫn đang thao tác.
         path: PathBuf,
-        /// Lỗi gốc.
         source: std::io::Error,
     },
 }
 
-/// Tham số quyết định nội dung `ClientAppSettings.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PatchSettings {
-    /// Đường dẫn file tuỳ biến, từ setting `CustomClientSettings`.
     pub custom_client_settings: Option<PathBuf>,
 
-    /// Setting `UnlockFPS`.
     pub unlock_fps: bool,
 
-    /// Setting `MaxFPSValue`. Chỉ dùng khi [`PatchSettings::unlock_fps`] bật.
     pub max_fps_value: u32,
 }
 
-/// Việc sẽ làm với `ClientAppSettings.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientSettingsPlan {
-    /// Chép nguyên file tuỳ biến đè lên.
     CopyCustom(PathBuf),
 
-    /// Ghi chuỗi JSON này.
     Write(String),
 
-    /// Không đổi gì.
     Leave,
 }
 
-/// Suy ra thư mục version từ giá trị `DefaultIcon` của giao thức `roblox`.
-///
-/// Giá trị thật trong registry thường ở một trong hai dạng:
-///
-/// - `C:\Program Files (x86)\Roblox\Versions\version-abc\RobloxPlayerBeta.exe`
-/// - `"C:\...\RobloxPlayerBeta.exe",0`
-///
-/// RAM dùng thẳng giá trị làm đường dẫn nên **dạng thứ hai làm nó hỏng** — `Directory.GetParent`
-/// trả về thư mục cha của chuỗi có `,0`, không tồn tại, và `ClientSettingsPatcher.cs:18` chỉ ghi
-/// log rồi thoát. Ta cắt cặp ngoặc kép và hậu tố `,<index>` trước. Đây là cải tiến không phá tương
-/// thích: nó chỉ thành công ở đúng chỗ RAM thất bại im lặng.
 #[must_use]
 pub fn version_folder_from_default_icon(value: &str) -> Option<PathBuf> {
     let trimmed = value.trim();
@@ -123,10 +56,6 @@ pub fn version_folder_from_default_icon(value: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // Bỏ hậu tố ",<index>" TRƯỚC, vì nó nằm ngoài cặp ngoặc kép:
-    //   "C:\...\RobloxPlayerBeta.exe",0
-    // Cắt ở dấu phẩy CUỐI và chỉ khi phần sau nó là một số, để không đụng vào dấu phẩy trong tên
-    // thư mục (ví dụ `C:\Roblox, Inc\...`).
     let without_index = match trimmed.rfind(',') {
         Some(position) if trimmed[position + 1..].trim().parse::<i32>().is_ok() => {
             &trimmed[..position]
@@ -134,7 +63,6 @@ pub fn version_folder_from_default_icon(value: &str) -> Option<PathBuf> {
         _ => trimmed,
     };
 
-    // Rồi mới bỏ cặp ngoặc kép bao quanh đường dẫn.
     let path_part = without_index.trim();
     let path_part =
         if path_part.len() >= 2 && path_part.starts_with('"') && path_part.ends_with('"') {
@@ -151,7 +79,6 @@ pub fn version_folder_from_default_icon(value: &str) -> Option<PathBuf> {
     Some(folder)
 }
 
-/// `true` nếu `folder` là một thư mục version Roblox hợp lệ.
 #[must_use]
 pub fn is_version_folder(folder: &Path) -> bool {
     let name_ok = folder
@@ -162,7 +89,6 @@ pub fn is_version_folder(folder: &Path) -> bool {
     name_ok && folder.is_dir() && folder.join(VERSION_MARKER_EXE).is_file()
 }
 
-/// Đường dẫn file `ClientAppSettings.json` bên trong một thư mục version.
 #[must_use]
 pub fn client_app_settings_path(version_folder: &Path) -> PathBuf {
     version_folder
@@ -170,12 +96,6 @@ pub fn client_app_settings_path(version_folder: &Path) -> PathBuf {
         .join(CLIENT_APP_SETTINGS_FILE)
 }
 
-/// Quyết định nội dung `ClientAppSettings.json` — thuần tuý, không chạm đĩa.
-///
-/// `existing` là nội dung file hiện có, `None` nếu file chưa tồn tại.
-///
-/// Thứ tự ưu tiên đúng như RAM (`ClientSettingsPatcher.cs:29-40`): file tuỳ biến thắng, rồi mới
-/// tới `UnlockFPS`.
 #[must_use]
 pub fn plan_client_settings(
     existing: Option<&str>,
@@ -191,7 +111,6 @@ pub fn plan_client_settings(
         return ClientSettingsPlan::Leave;
     }
 
-    // Merge vào JSON sẵn có để không xoá mất các khoá tinh chỉnh khác người dùng đã đặt.
     if let Some(text) = existing {
         if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text) {
             if let Some(object) = value.as_object_mut() {
@@ -199,7 +118,6 @@ pub fn plan_client_settings(
                     FPS_KEY.to_owned(),
                     serde_json::Value::from(settings.max_fps_value),
                 );
-                // `Value::to_string` là JSON nén — tương đương `Formatting.None` của RAM.
                 return ClientSettingsPlan::Write(value.to_string());
             }
         }
@@ -208,14 +126,6 @@ pub fn plan_client_settings(
     ClientSettingsPlan::Write(format!("{{\"{FPS_KEY}\":{}}}", settings.max_fps_value))
 }
 
-/// Áp [`plan_client_settings`] lên đĩa.
-///
-/// Tạo thư mục `ClientSettings` nếu chưa có, đúng như `ClientSettingsPatcher.cs:24`.
-///
-/// # Errors
-///
-/// Trả [`PatchError::NotAVersionFolder`] nếu thư mục không hợp lệ, hoặc [`PatchError::Io`] nếu
-/// không đọc/ghi được.
 pub fn apply_client_settings(
     version_folder: &Path,
     settings: &PatchSettings,
@@ -257,18 +167,10 @@ pub fn apply_client_settings(
     Ok(plan)
 }
 
-// ------------------------------------------------------------------ đọc registry (chỉ Windows)
-
-/// Đọc giá trị chuỗi `DefaultIcon` của giao thức `roblox` từ `HKEY_CLASSES_ROOT`.
-///
-/// # Errors
-///
-/// Trả [`PatchError::Registry`] nếu Win32 từ chối.
 #[cfg(windows)]
 pub fn read_default_icon() -> Result<String, PatchError> {
     use core::ffi::c_void;
 
-    /// Đường dẫn khoá con, cũng dùng làm nhãn trong thông báo lỗi.
     const SUBKEY: &str = r"roblox\DefaultIcon";
 
     #[link(name = "advapi32")]
@@ -284,26 +186,19 @@ pub fn read_default_icon() -> Result<String, PatchError> {
         ) -> i32;
     }
 
-    /// `HKEY_CLASSES_ROOT`. Trên 64 bit giá trị này là `0xFFFF_FFFF_8000_0000`, nên phải đi qua
-    /// `i32` để sign-extend đúng — viết thẳng `0x8000_0000` sẽ ra một handle sai.
     const HKEY_CLASSES_ROOT: isize = 0x8000_0000u32 as i32 as isize;
 
-    /// Chỉ nhận `REG_SZ` (và `REG_EXPAND_SZ` sẽ bị từ chối để không phải tự expand).
     const RRF_RT_REG_SZ: u32 = 0x0000_0002;
 
     const ERROR_SUCCESS: i32 = 0;
 
     let subkey: Vec<u16> = SUBKEY.encode_utf16().chain(core::iter::once(0)).collect();
-    // Chuỗi rỗng = giá trị mặc định (không tên) của khoá.
     let value_name: Vec<u16> = core::iter::once(0).collect();
 
-    // 1024 ký tự là quá đủ cho một đường dẫn; nếu Win32 cần hơn nó sẽ báo lỗi thay vì tràn.
     let mut buffer = vec![0u16; 1024];
     let mut size_bytes = (buffer.len() * size_of::<u16>()) as u32;
     let mut value_type = 0u32;
 
-    // SAFETY: hai chuoi wide ket thuc bang 0 song trong suot loi goi; `buffer` du lon va `size_bytes`
-    // mo ta dung kich thuoc cua no; cac con tro con lai tro toi bien cuc bo hop le.
     let status = unsafe {
         RegGetValueW(
             HKEY_CLASSES_ROOT as *mut c_void,
@@ -323,20 +218,12 @@ pub fn read_default_icon() -> Result<String, PatchError> {
         });
     }
 
-    // `size_bytes` tính cả ký tự kết thúc null.
     let length = (size_bytes as usize / size_of::<u16>()).saturating_sub(1);
     let length = length.min(buffer.len());
 
     Ok(String::from_utf16_lossy(&buffer[..length]))
 }
 
-/// Tìm thư mục version Roblox đang cài.
-///
-/// # Errors
-///
-/// Trả [`PatchError::Registry`] nếu không đọc được registry,
-/// [`PatchError::BadDefaultIcon`] nếu giá trị không suy ra được đường dẫn, hoặc
-/// [`PatchError::NotAVersionFolder`] nếu thư mục không hợp lệ.
 #[cfg(windows)]
 pub fn find_version_folder() -> Result<PathBuf, PatchError> {
     let raw = read_default_icon()?;
@@ -354,8 +241,6 @@ pub fn find_version_folder() -> Result<PathBuf, PatchError> {
 mod tests {
     use super::*;
 
-    // ---------------------------------------------------------------- DefaultIcon
-
     #[test]
     fn a_bare_executable_path_yields_its_parent_folder() {
         let value = r"C:\Program Files (x86)\Roblox\Versions\version-abc\RobloxPlayerBeta.exe";
@@ -369,7 +254,6 @@ mod tests {
 
     #[test]
     fn a_quoted_path_with_an_icon_index_is_handled() {
-        // Dang thuong gap trong registry, va la dang lam RAM hong.
         let value =
             r#""C:\Program Files (x86)\Roblox\Versions\version-abc\RobloxPlayerBeta.exe",0"#;
         assert_eq!(
@@ -408,10 +292,7 @@ mod tests {
         );
     }
 
-    // ---------------------------------------------------------------- version folder
-
     fn make_version_folder(tag: &str, with_marker: bool) -> PathBuf {
-        // Ten thu muc PHAI bat dau bang "version-" thi moi la thu muc version hop le.
         let dir = std::env::temp_dir().join(format!("version-muster-patch-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("tạo thư mục");
@@ -438,7 +319,6 @@ mod tests {
 
     #[test]
     fn a_folder_with_the_marker_but_the_wrong_name_is_rejected() {
-        // ClientSettingsPatcher.cs:19 doi ten phai bat dau bang "version-".
         let dir = std::env::temp_dir().join("muster-patch-wrongname");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("tạo thư mục");
@@ -456,8 +336,6 @@ mod tests {
         let path = client_app_settings_path(Path::new(r"C:\Roblox\Versions\version-1"));
         assert!(path.ends_with(Path::new(CLIENT_SETTINGS_DIR).join(CLIENT_APP_SETTINGS_FILE)));
     }
-
-    // ---------------------------------------------------------------- plan
 
     fn patch_settings(custom: Option<&str>, unlock_fps: bool, fps: u32) -> PatchSettings {
         PatchSettings {
@@ -541,8 +419,6 @@ mod tests {
             ClientSettingsPlan::Write("{\"DFIntTaskSchedulerTargetFps\":240}".to_owned())
         );
     }
-
-    // ---------------------------------------------------------------- apply
 
     #[test]
     fn applying_writes_the_file_and_creates_the_subfolder() {

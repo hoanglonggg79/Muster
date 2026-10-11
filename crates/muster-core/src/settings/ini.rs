@@ -1,35 +1,15 @@
-//! # `settings::ini` — parser `RAMSettings.ini`
-//!
-//! Tái lập đúng hành vi của `Classes/IniFile.cs` trong `RAM_Source/`. Ba điểm cần giữ đúng,
-//! vì lệch một cái là migration đọc sai file của người dùng:
-//!
-//! 1. **Bỏ qua dòng trống và dòng bắt đầu bằng `;` hoặc `#`.**
-//! 2. **`[Tên section]`** mở section mới. Riêng `[RBX Alt Manager]` bị đổi thành
-//!    `[Roblox Account Manager]` để tương thích theme cũ (`IniFile.cs:211`).
-//! 3. **`key=value` cắt ở dấu `=` đầu tiên.** Nếu phần value rỗng thì dòng bị **bỏ qua** —
-//!    đây là hệ quả của `StringSplitOptions.RemoveEmptyEntries` ở `IniFile.cs:222`, và nó khớp
-//!    với chiều ghi: `IniSection.Set` xoá hẳn property khi value rỗng (`IniFile.cs:107`).
-//!
-//! Khoá và giá trị đều được `Trim()`. Khoá trùng thì lần sau thắng (RAM ghi đè vào dictionary).
-
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// Section cũ bị đổi tên để tương thích theme.
 const LEGACY_SECTION: &str = "RBX Alt Manager";
-/// Tên section mới tương ứng.
 const LEGACY_SECTION_REPLACEMENT: &str = "Roblox Account Manager";
 
-/// Nội dung một file INI: tên section → (tên khoá → giá trị).
-///
-/// Dùng `BTreeMap` để thứ tự section và khoá ổn định giữa các lần chạy, giúp diff không nhiễu.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IniFile {
     sections: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl IniFile {
-    /// Phân tích nội dung INI.
     #[must_use]
     pub fn parse(text: &str) -> Self {
         let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
@@ -53,7 +33,6 @@ impl IniFile {
             }
 
             let Some(section) = current.as_ref() else {
-                // Khoá nằm ngoài mọi section: RAM bỏ qua (`IniFile.cs:220`).
                 continue;
             };
 
@@ -64,7 +43,6 @@ impl IniFile {
             let key = key.trim();
             let value = value.trim();
 
-            // Value rong -> RAM bo qua dong do, xem ghi chu dau module.
             if key.is_empty() || value.is_empty() {
                 continue;
             }
@@ -78,16 +56,10 @@ impl IniFile {
         Self { sections }
     }
 
-    /// Đọc và phân tích một file INI.
-    ///
-    /// # Errors
-    ///
-    /// Trả lỗi I/O nếu không đọc được file.
     pub fn from_path(path: &Path) -> std::io::Result<Self> {
         Ok(Self::parse(&std::fs::read_to_string(path)?))
     }
 
-    /// Giá trị của một khoá, nếu có.
     #[must_use]
     pub fn get(&self, section: &str, key: &str) -> Option<&str> {
         self.sections
@@ -96,31 +68,22 @@ impl IniFile {
             .map(String::as_str)
     }
 
-    /// Toàn bộ khoá của một section.
     #[must_use]
     pub fn section(&self, name: &str) -> Option<&BTreeMap<String, String>> {
         self.sections.get(name)
     }
 
-    /// Duyệt các section theo thứ tự tên.
     pub fn sections(&self) -> impl Iterator<Item = (&str, &BTreeMap<String, String>)> {
         self.sections
             .iter()
             .map(|(name, entries)| (name.as_str(), entries))
     }
 
-    /// `true` nếu file không có section nào có nội dung.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sections.values().all(BTreeMap::is_empty)
     }
 
-    // ------------------------------------------------------------------ helper doc gia tri
-
-    /// Đọc một giá trị boolean. Chấp nhận `true`/`false` (không phân biệt hoa thường) và `1`/`0`.
-    ///
-    /// Giá trị không đọc được thì trả `fallback` — RAM dùng `Convert.ChangeType` và sẽ ném lỗi,
-    /// nhưng trong một trình nhập thì đoán theo mặc định an toàn hơn là từ chối cả file.
     #[must_use]
     pub fn bool_or(&self, section: &str, key: &str, fallback: bool) -> bool {
         match self.get(section, key) {
@@ -133,7 +96,6 @@ impl IniFile {
         }
     }
 
-    /// Đọc một giá trị số nguyên, trả `fallback` nếu thiếu hoặc không phân tích được.
     #[must_use]
     pub fn int_or<T: std::str::FromStr>(&self, section: &str, key: &str, fallback: T) -> T {
         self.get(section, key)
@@ -141,7 +103,6 @@ impl IniFile {
             .unwrap_or(fallback)
     }
 
-    /// Đọc một giá trị số thực, trả `fallback` nếu thiếu hoặc không phân tích được.
     #[must_use]
     pub fn float_or<T: std::str::FromStr>(&self, section: &str, key: &str, fallback: T) -> T {
         self.get(section, key)
@@ -149,14 +110,12 @@ impl IniFile {
             .unwrap_or(fallback)
     }
 
-    /// Đọc một giá trị chuỗi, trả `fallback` nếu thiếu.
     #[must_use]
     pub fn str_or(&self, section: &str, key: &str, fallback: &str) -> String {
         self.get(section, key)
             .map_or_else(|| fallback.to_owned(), str::to_owned)
     }
 
-    /// Đọc một giá trị chuỗi, trả `None` nếu thiếu hoặc rỗng.
     #[must_use]
     pub fn opt_str(&self, section: &str, key: &str) -> Option<String> {
         self.get(section, key)
@@ -165,7 +124,6 @@ impl IniFile {
     }
 }
 
-/// Đổi tên section cũ sang tên mới, giữ nguyên các section khác.
 fn normalize_section_name(name: &str) -> String {
     if name == LEGACY_SECTION {
         LEGACY_SECTION_REPLACEMENT.to_owned()
