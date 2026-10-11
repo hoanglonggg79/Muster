@@ -162,6 +162,25 @@ impl Account {
             .as_deref()
             .filter(|token| !token.is_empty())
     }
+
+    /// Đọc một field tuỳ ý trong túi [`Account::fields`]. `Account.cs:828`.
+    ///
+    /// Trả `""` khi field vắng — đúng hành vi `GetField` của RAM, nhờ vậy chỗ gọi không phải
+    /// phân biệt "vắng" với "rỗng".
+    #[must_use]
+    pub fn get_field(&self, name: &str) -> &str {
+        self.fields.get(name).map_or("", String::as_str)
+    }
+
+    /// Ghi một field tuỳ ý. `Account.cs:829`.
+    pub fn set_field(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.fields.insert(name.into(), value.into());
+    }
+
+    /// Xoá một field tuỳ ý, trả giá trị cũ nếu có. `Account.cs:830`.
+    pub fn remove_field(&mut self, name: &str) -> Option<String> {
+        self.fields.remove(name)
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +294,34 @@ mod tests {
 
         account.security_token = None;
         assert_eq!(account.cookie(), None);
+    }
+
+    #[test]
+    fn field_helpers_mirror_ram_behaviour() {
+        let mut account = sample();
+
+        assert_eq!(
+            account.get_field("Window_Width"),
+            "",
+            "field vang phai tra ve chuoi rong, khong phai panic"
+        );
+
+        account.set_field("Window_Width", "880");
+        assert_eq!(account.get_field("Window_Width"), "880");
+
+        account.set_field("Window_Width", "1024");
+        assert_eq!(
+            account.get_field("Window_Width"),
+            "1024",
+            "ghi de phai thay gia tri cu"
+        );
+
+        assert_eq!(
+            account.remove_field("Window_Width"),
+            Some("1024".to_owned())
+        );
+        assert_eq!(account.get_field("Window_Width"), "");
+        assert_eq!(account.remove_field("Window_Width"), None);
     }
 
     #[test]
