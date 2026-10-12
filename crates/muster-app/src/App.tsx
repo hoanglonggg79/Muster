@@ -118,7 +118,7 @@ export function App() {
 
   async function launchAccount(userId: number) {
     const pid = Number(placeId);
-    if (!pid || isNaN(pid)) {
+    if (!pid || Number.isNaN(pid)) {
       notify("Vui lòng nhập Place ID hợp lệ");
       return;
     }
@@ -248,7 +248,7 @@ export function App() {
   // Calculate total Robux
   const totalRobux = accounts.reduce((acc, curr) => {
     const r = parseInt(curr.Fields?.Robux?.replace(/[^0-9]/g, "") || "0", 10);
-    return acc + (isNaN(r) ? 0 : r);
+    return acc + (Number.isNaN(r) ? 0 : r);
   }, 0);
 
   return (
@@ -265,7 +265,7 @@ export function App() {
           </div>
 
           <nav className="sidebar__nav">
-            <button
+            <button type="button"
               className={`nav-item ${activeTab === "overview" ? "active" : ""}`}
               onClick={() => setActiveTab("overview")}
             >
@@ -275,7 +275,7 @@ export function App() {
               </div>
             </button>
 
-            <button
+            <button type="button"
               className={`nav-item ${activeTab === "accounts" ? "active" : ""}`}
               onClick={() => setActiveTab("accounts")}
             >
@@ -286,7 +286,7 @@ export function App() {
               <span className="nav-badge">{accounts.length}</span>
             </button>
 
-            <button
+            <button type="button"
               className={`nav-item ${activeTab === "games" ? "active" : ""}`}
               onClick={() => setActiveTab("games")}
             >
@@ -296,7 +296,7 @@ export function App() {
               </div>
             </button>
 
-            <button
+            <button type="button"
               className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
               onClick={() => setActiveTab("settings")}
             >
@@ -316,7 +316,7 @@ export function App() {
                 <span className={`status-dot ${multiRoblox ? "active" : ""}`}></span>
                 <span style={{ color: "var(--text-secondary)" }}>Multi-Roblox</span>
               </div>
-              <button className="quick-toggle-btn" onClick={toggleMultiRoblox}>
+              <button type="button" className="quick-toggle-btn" onClick={toggleMultiRoblox}>
                 {multiRoblox ? "ENABLED" : "OFF"}
               </button>
             </div>
@@ -364,11 +364,11 @@ export function App() {
           </div>
 
           <div className="topbar-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
               <Download size={13} strokeWidth={1.75} />
               <span>Import RAM</span>
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
               <Plus size={13} strokeWidth={2} />
               <span>Add Account</span>
             </button>
@@ -471,7 +471,7 @@ export function App() {
                       </select>
                     </div>
 
-                    <button
+                    <button type="button"
                       className="btn btn-primary"
                       onClick={() => {
                         const targetId = selectedUserId ?? accounts[0]?.UserID;
@@ -500,21 +500,21 @@ export function App() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   {searchQuery && (
-                    <button className="icon-btn" onClick={() => setSearchQuery("")}>
+                    <button type="button" className="icon-btn" onClick={() => setSearchQuery("")}>
                       <X size={12} strokeWidth={1.75} />
                     </button>
                   )}
                 </div>
 
                 <div className="view-controls">
-                  <button
+                  <button type="button"
                     className={`icon-btn ${viewMode === "grid" ? "active" : ""}`}
                     onClick={() => setViewMode("grid")}
                     title="Grid view"
                   >
                     <LayoutGrid size={15} strokeWidth={1.75} />
                   </button>
-                  <button
+                  <button type="button"
                     className={`icon-btn ${viewMode === "table" ? "active" : ""}`}
                     onClick={() => setViewMode("table")}
                     title="Table view"
@@ -522,7 +522,7 @@ export function App() {
                     <List size={15} strokeWidth={1.75} />
                   </button>
                   <div style={{ width: "1px", height: "16px", background: "var(--border-medium)", margin: "0 4px" }} />
-                  <button className="btn btn-secondary btn-sm" onClick={refreshAccounts} title="Reload accounts">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={refreshAccounts} title="Reload accounts">
                     <RefreshCw size={12} strokeWidth={1.75} />
                     <span>Refresh</span>
                   </button>
@@ -539,11 +539,11 @@ export function App() {
                       : "Add accounts via .ROBLOSECURITY cookie or import existing accounts from RAM."}
                   </p>
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
                       <Plus size={13} strokeWidth={2} />
                       <span>Add New Account</span>
                     </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
                       <Download size={13} strokeWidth={1.75} />
                       <span>Import From RAM</span>
                     </button>
@@ -584,14 +584,14 @@ export function App() {
 
                         <div className="account-card__footer">
                           <div className="card-action-group">
-                            <button
+                            <button type="button"
                               className="icon-btn"
                               onClick={() => refreshAccount(uid)}
                               title="Refresh profile & Robux"
                             >
                               <RefreshCw size={13} strokeWidth={1.75} />
                             </button>
-                            <button
+                            <button type="button"
                               className="icon-btn danger"
                               onClick={() => removeAccount(uid, displayName)}
                               title="Remove account"
@@ -600,7 +600,7 @@ export function App() {
                             </button>
                           </div>
 
-                          <button className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
                             <Play size={11} fill="currentColor" />
                             <span>Launch</span>
                           </button>
@@ -654,13 +654,13 @@ export function App() {
                             </td>
                             <td style={{ textAlign: "right" }}>
                               <div style={{ display: "inline-flex", gap: "6px" }}>
-                                <button className="icon-btn" onClick={() => refreshAccount(uid)} title="Refresh">
+                                <button type="button" className="icon-btn" onClick={() => refreshAccount(uid)} title="Refresh">
                                   <RefreshCw size={13} strokeWidth={1.75} />
                                 </button>
-                                <button className="icon-btn danger" onClick={() => removeAccount(uid, displayName)} title="Delete">
+                                <button type="button" className="icon-btn danger" onClick={() => removeAccount(uid, displayName)} title="Delete">
                                   <Trash2 size={13} strokeWidth={1.75} />
                                 </button>
-                                <button className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                                <button type="button" className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
                                   <Play size={10} fill="currentColor" />
                                   <span>Launch</span>
                                 </button>
@@ -678,70 +678,68 @@ export function App() {
 
           {/* TAB 3: GAME SEARCH / PLACE EXPLORER */}
           {activeTab === "games" && (
-            <>
-              <div className="launch-bar">
-                <div className="overview-banner__title">
-                  <Gamepad2 size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
-                  <span>Target Game Configuration</span>
-                </div>
-
-                <div className="launch-grid">
-                  <div className="input-group">
-                    <label className="input-label">Place ID (Roblox Experience ID)</label>
-                    <input
-                      className="input-field"
-                      type="text"
-                      value={placeId}
-                      onChange={(e) => setPlaceId(e.target.value)}
-                      placeholder="e.g. 4483381587"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label className="input-label">Job ID (Specific Server Instance)</label>
-                    <input
-                      className="input-field"
-                      type="text"
-                      value={jobId}
-                      onChange={(e) => setJobId(e.target.value)}
-                      placeholder="Leave empty for public join"
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: "6px" }}>
-                  <label className="input-label" style={{ marginBottom: "8px", display: "block" }}>
-                    Quick Bookmarks
-                  </label>
-                  <div className="game-bookmarks">
-                    {PRESET_GAMES.map((game) => (
-                      <div
-                        key={game.placeId}
-                        className={`game-bookmark-chip ${placeId === game.placeId ? "active" : ""}`}
-                        onClick={() => setPlaceId(game.placeId)}
-                      >
-                        <span className="bookmark-title">{game.name}</span>
-                        <span className="bookmark-id">{game.placeId}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {accounts.length > 0 && (
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => {
-                        const targetId = selectedUserId ?? accounts[0]?.UserID;
-                        if (targetId) launchAccount(targetId);
-                      }}
-                    >
-                      <Play size={13} fill="currentColor" />
-                      <span>Launch Game Now</span>
-                    </button>
-                  </div>
-                )}
+            <div className="launch-bar">
+              <div className="overview-banner__title">
+                <Gamepad2 size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <span>Target Game Configuration</span>
               </div>
-            </>
+
+              <div className="launch-grid">
+                <div className="input-group">
+                  <label className="input-label">Place ID (Roblox Experience ID)</label>
+                  <input
+                    className="input-field"
+                    type="text"
+                    value={placeId}
+                    onChange={(e) => setPlaceId(e.target.value)}
+                    placeholder="e.g. 4483381587"
+                  />
+                </div>
+                <div className="input-group">
+                  <label className="input-label">Job ID (Specific Server Instance)</label>
+                  <input
+                    className="input-field"
+                    type="text"
+                    value={jobId}
+                    onChange={(e) => setJobId(e.target.value)}
+                    placeholder="Leave empty for public join"
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: "6px" }}>
+                <label className="input-label" style={{ marginBottom: "8px", display: "block" }}>
+                  Quick Bookmarks
+                </label>
+                <div className="game-bookmarks">
+                  {PRESET_GAMES.map((game) => (
+                    <div
+                      key={game.placeId}
+                      className={`game-bookmark-chip ${placeId === game.placeId ? "active" : ""}`}
+                      onClick={() => setPlaceId(game.placeId)}
+                    >
+                      <span className="bookmark-title">{game.name}</span>
+                      <span className="bookmark-id">{game.placeId}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {accounts.length > 0 && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
+                  <button type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      const targetId = selectedUserId ?? accounts[0]?.UserID;
+                      if (targetId) launchAccount(targetId);
+                    }}
+                  >
+                    <Play size={13} fill="currentColor" />
+                    <span>Launch Game Now</span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           {/* TAB 4: SETTINGS */}
@@ -757,7 +755,7 @@ export function App() {
                       Bypasses single-instance Windows mutex to allow running multiple Roblox clients concurrently.
                     </span>
                   </div>
-                  <button
+                  <button type="button"
                     className={`btn ${multiRoblox ? "btn-primary" : "btn-secondary"}`}
                     onClick={toggleMultiRoblox}
                   >
@@ -773,25 +771,25 @@ export function App() {
                     </span>
                   </div>
                   <div className="fps-chip-group">
-                    <button
+                    <button type="button"
                       className={`fps-chip ${!unlockFps ? "active" : ""}`}
                       onClick={() => applyFps(false, 60)}
                     >
                       60 (Default)
                     </button>
-                    <button
+                    <button type="button"
                       className={`fps-chip ${unlockFps && maxFps === 144 ? "active" : ""}`}
                       onClick={() => applyFps(true, 144)}
                     >
                       144 FPS
                     </button>
-                    <button
+                    <button type="button"
                       className={`fps-chip ${unlockFps && maxFps === 240 ? "active" : ""}`}
                       onClick={() => applyFps(true, 240)}
                     >
                       240 FPS
                     </button>
-                    <button
+                    <button type="button"
                       className={`fps-chip ${unlockFps && maxFps === 360 ? "active" : ""}`}
                       onClick={() => applyFps(true, 360)}
                     >
@@ -811,7 +809,7 @@ export function App() {
                       Migrate accounts from legacy C# Roblox-Account-Manager AccountData.json directory.
                     </span>
                   </div>
-                  <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
                     <Download size={13} strokeWidth={1.75} />
                     <span>Migrate Accounts</span>
                   </button>
@@ -844,7 +842,7 @@ export function App() {
                 <KeyRound size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
                 <h3>Add Account</h3>
               </div>
-              <button
+              <button type="button"
                 className="icon-btn"
                 onClick={() => setShowAddModal(false)}
                 disabled={submitting}
@@ -927,14 +925,14 @@ export function App() {
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
-              <button
+              <button type="button"
                 className="btn btn-secondary"
                 onClick={() => setShowAddModal(false)}
                 disabled={submitting}
               >
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handleAddAccount} disabled={submitting}>
+              <button type="button" className="btn btn-primary" onClick={handleAddAccount} disabled={submitting}>
                 {submitting ? "Processing..." : "Confirm & Save"}
               </button>
             </div>
@@ -951,7 +949,7 @@ export function App() {
                 <Download size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
                 <h3>Import from RAM Directory</h3>
               </div>
-              <button
+              <button type="button"
                 className="icon-btn"
                 onClick={() => setShowImportModal(false)}
                 disabled={submitting}
@@ -976,14 +974,14 @@ export function App() {
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
-              <button
+              <button type="button"
                 className="btn btn-secondary"
                 onClick={() => setShowImportModal(false)}
                 disabled={submitting}
               >
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handleImportRAM} disabled={submitting}>
+              <button type="button" className="btn btn-primary" onClick={handleImportRAM} disabled={submitting}>
                 {submitting ? "Importing..." : "Start Import"}
               </button>
             </div>

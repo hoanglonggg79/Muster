@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint",
+    "lint:fix": "biome lint --write",
     "codegen": "cargo run --manifest-path ../../Cargo.toml -p muster-app --bin muster-codegen",
     "tauri": "tauri"
   },
@@ -18,6 +20,7 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
     "@tauri-apps/api": "~2.11.0",
     "@tauri-apps/cli": "~2.11.0",
     "@types/react": "^19.3.0",
