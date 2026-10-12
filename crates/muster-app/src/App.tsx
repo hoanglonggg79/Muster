@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { commands } from "./bindings";
 import type { Account } from "./bindings";
 import {
@@ -21,9 +21,48 @@ import {
   X,
   KeyRound,
   Compass,
+  Square,
+  SquareCheck,
+  SquarePen,
 } from "lucide-react";
 
 type NavigationTab = "overview" | "accounts" | "games" | "settings";
+
+type LaunchPhase = "launching" | "done" | "error";
+
+function stripGroupPrefix(group: string): string {
+  return group.replace(/^\d{1,3}\s?/, "");
+}
+
+function groupLabel(acc: Account): string {
+  return stripGroupPrefix(acc.Group && acc.Group.trim() ? acc.Group : "Default");
+}
+
+function presenceLabel(type: number): string {
+  switch (type) {
+    case 1:
+      return "Online";
+    case 2:
+      return "In Game";
+    case 3:
+      return "In Studio";
+    default:
+      return "Offline";
+  }
+}
+
+function presenceClass(type: number): string {
+  switch (type) {
+    case 1:
+      return "presence-badge presence-online";
+    case 2:
+      return "presence-badge presence-ingame";
+    case 3:
+      return "presence-badge presence-instudio";
+    default:
+      return "presence-badge presence-offline";
+  }
+}
 
 // Preset game bookmarked for quick launch
 const PRESET_GAMES = [
@@ -62,13 +101,47 @@ export function App() {
   const [userInput, setUserInput] = useState("");
   const [passInput, setPassInput] = useState("");
   const [ramPathInput, setRamPathInput] = useState("");
+  const [ramPassInput, setRamPassInput] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [launchPhases, setLaunchPhases] = useState<Record<number, LaunchPhase>>({});
+  const [presence, setPresence] = useState<Record<number, number>>({});
+  const [batchRunning, setBatchRunning] = useState(false);
+
+  const [editAccount, setEditAccount] = useState<Account | null>(null);
+  const [editAlias, setEditAlias] = useState("");
+  const [editGroup, setEditGroup] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPlaceId, setEditPlaceId] = useState("");
+  const [editJobId, setEditJobId] = useState("");
 
   function notify(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
   }
+
+  const refreshPresence = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) {
+      setPresence({});
+      return;
+    }
+    try {
+      const res = await commands.presenceBatch(ids);
+      if (res.status === "ok") {
+        const map: Record<number, number> = {};
+        for (const item of res.data) {
+          if (item.user_id !== null && item.user_id !== undefined) {
+            map[item.user_id] = item.presence_type;
+          }
+        }
+        setPresence(map);
+      }
+    } catch {
+      setPresence({});
+    }
+  }, []);
 
   async function refreshAccounts() {
     try {
@@ -79,6 +152,7 @@ export function App() {
           const firstUid = res.data[0]?.UserID;
           if (firstUid) setSelectedUserId(firstUid);
         }
+        refreshPresence(res.data.map((acc) => acc.UserID ?? 0).filter((id) => id > 0));
       }
     } catch (e) {
       notify(`Lỗi tải danh sách: ${String(e)}`);
@@ -88,6 +162,24 @@ export function App() {
   useEffect(() => {
     refreshAccounts();
   }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refreshPresence(accounts.map((acc) => acc.UserID ?? 0).filter((id) => id > 0));
+    }, 120000);
+    return () => clearInterval(timer);
+  }, [accounts, refreshPresence]);
+
+  function savedPlaceId(acc: Account): string {
+    const saved = acc.Fields?.SavedPlaceId;
+    return saved && saved.trim() ? saved.trim() : placeId;
+  }
+
+  function savedJobId(acc: Account): string | null {
+    const saved = acc.Fields?.SavedJobId;
+    if (saved && saved.trim()) return saved.trim();
+    return jobId.trim() || null;
+  }
 
   async function toggleMultiRoblox() {
     try {
@@ -116,22 +208,115 @@ export function App() {
     }
   }
 
-  async function launchAccount(userId: number) {
-    const pid = Number(placeId);
+  async function launchAccount(userId: number, acc?: Account): Promise<boolean> {
+    const rawPlace = acc ? savedPlaceId(acc) : placeId;
+    const pid = Number(String(rawPlace).replace(/[^0-9]/g, ""));
     if (!pid || Number.isNaN(pid)) {
       notify("Vui lòng nhập Place ID hợp lệ");
-      return;
+      return false;
     }
+    const job = acc ? savedJobId(acc) : (jobId.trim() || null);
     notify("Đang khởi chạy Roblox client...");
     try {
-      const res = await commands.accountLaunch(userId, pid, jobId.trim() || null);
+      const res = await commands.accountLaunch(userId, pid, job);
       if (res.status === "ok") {
         notify(res.data);
-      } else {
-        notify(`Lỗi khởi chạy: ${res.error}`);
+        return true;
       }
+      notify(`Lỗi khởi chạy: ${res.error}`);
+      return false;
     } catch (e) {
       notify(`Lỗi launch: ${String(e)}`);
+      return false;
+    }
+  }
+
+  function toggleSelect(userId: number) {
+    setSelectedIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  }
+
+  function toggleSelectAll() {
+    const visible = filteredAccounts.map((acc) => acc.UserID ?? 0);
+    const allSelected = visible.every((id) => selectedIds.includes(id));
+    setSelectedIds(allSelected ? [] : visible);
+  }
+
+  async function launchSelected() {
+    const chosen = filteredAccounts.filter((acc) => selectedIds.includes(acc.UserID ?? 0));
+    if (chosen.length === 0) {
+      notify("Chưa chọn tài khoản nào để khởi chạy");
+      return;
+    }
+
+    setBatchRunning(true);
+    let okCount = 0;
+    const failed: string[] = [];
+
+    for (let index = 0; index < chosen.length; index++) {
+      const acc = chosen[index];
+      if (!acc) continue;
+      const uid = acc.UserID ?? 0;
+      const name = acc.Fields?.DisplayName || acc.Username || String(uid);
+
+      setLaunchPhases((prev) => ({ ...prev, [uid]: "launching" }));
+      const ok = await launchAccount(uid, acc);
+      setLaunchPhases((prev) => ({ ...prev, [uid]: ok ? "done" : "error" }));
+
+      if (ok) {
+        okCount++;
+      } else {
+        failed.push(name);
+      }
+
+      if (index < chosen.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    setBatchRunning(false);
+    setSelectedIds([]);
+    notify(
+      failed.length === 0
+        ? `Đã khởi chạy ${okCount} tài khoản`
+        : `Hoàn tất: ${okCount} thành công, lỗi ${failed.length} (${failed.join(", ")})`
+    );
+    setTimeout(() => setLaunchPhases({}), 6000);
+  }
+
+  function openEdit(acc: Account) {
+    setEditAccount(acc);
+    setEditAlias(acc.Alias ?? "");
+    setEditGroup(acc.Group ?? "");
+    setEditDescription(acc.Description ?? "");
+    setEditPlaceId(acc.Fields?.SavedPlaceId ?? "");
+    setEditJobId(acc.Fields?.SavedJobId ?? "");
+  }
+
+  async function saveEdit() {
+    if (!editAccount) return;
+    setSubmitting(true);
+    try {
+      const res = await commands.accountUpdate(
+        editAccount.UserID ?? 0,
+        editAlias,
+        editGroup.trim() || null,
+        editDescription,
+        editPlaceId.trim() || null,
+        editJobId.trim() || null
+      );
+      if (res.status === "ok") {
+        notify(`Đã cập nhật ${res.data.Username ?? "tài khoản"}`);
+        setEditAccount(null);
+        refreshAccounts();
+      } else {
+        notify(`Lỗi cập nhật: ${res.error}`);
+      }
+    } catch (e) {
+      notify(`Lỗi: ${String(e)}`);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -219,11 +404,12 @@ export function App() {
     }
     setSubmitting(true);
     try {
-      const res = await commands.vaultImportRam(ramPathInput.trim());
+      const res = await commands.vaultImportRam(ramPathInput.trim(), ramPassInput || null);
       if (res.status === "ok") {
         notify(`Đã nhập thành công ${res.data} tài khoản từ RAM!`);
         setShowImportModal(false);
         setRamPathInput("");
+        setRamPassInput("");
         refreshAccounts();
       } else {
         notify(`Lỗi nhập: ${res.error}`);
@@ -529,6 +715,26 @@ export function App() {
                 </div>
               </div>
 
+              <div className="batch-bar">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={toggleSelectAll}>
+                  {filteredAccounts.length > 0 && filteredAccounts.every((acc) => selectedIds.includes(acc.UserID ?? 0)) ? (
+                    <SquareCheck size={13} strokeWidth={1.75} />
+                  ) : (
+                    <Square size={13} strokeWidth={1.75} />
+                  )}
+                  <span>{selectedIds.length > 0 ? `Đã chọn ${selectedIds.length}` : "Chọn tất cả"}</span>
+                </button>
+                <button type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={launchSelected}
+                  disabled={batchRunning || selectedIds.length === 0}
+                  title="Khởi chạy tuần tự các tài khoản đã chọn"
+                >
+                  <Play size={12} fill="currentColor" />
+                  <span>{batchRunning ? "Đang chạy..." : `Launch ${selectedIds.length || ""}`.trim()}</span>
+                </button>
+              </div>
+
               {filteredAccounts.length === 0 ? (
                 <div className="empty-state">
                   <Shield size={32} strokeWidth={1.5} color="var(--text-muted)" />
@@ -557,10 +763,19 @@ export function App() {
                     const username = acc.Username || `ID: ${uid}`;
                     const robux = acc.Fields?.Robux || "0";
                     const avatarUrl = acc.Fields?.AvatarUrl;
+                    const selected = selectedIds.includes(uid);
+                    const phase = launchPhases[uid];
 
                     return (
-                      <div key={uid} className="account-card">
+                      <div key={uid} className={`account-card ${selected ? "selected" : ""}`}>
                         <div className="account-card__header">
+                          <button type="button"
+                            className="acct-check"
+                            onClick={() => toggleSelect(uid)}
+                            title={selected ? "Bỏ chọn" : "Chọn để launch hàng loạt"}
+                          >
+                            {selected ? <SquareCheck size={16} strokeWidth={1.75} /> : <Square size={16} strokeWidth={1.75} />}
+                          </button>
                           <div className="avatar-frame">
                             {avatarUrl ? (
                               <img src={avatarUrl} alt={username} />
@@ -582,8 +797,25 @@ export function App() {
                           </div>
                         </div>
 
+                        <div className="account-card__meta">
+                          <span className="group-chip" title={`Nhóm: ${acc.Group ?? "Default"}`}>
+                            {groupLabel(acc)}
+                          </span>
+                          <span className={presenceClass(presence[uid] ?? 0)}>
+                            <span className="presence-dot" />
+                            {presenceLabel(presence[uid] ?? 0)}
+                          </span>
+                        </div>
+
                         <div className="account-card__footer">
                           <div className="card-action-group">
+                            <button type="button"
+                              className="icon-btn"
+                              onClick={() => openEdit(acc)}
+                              title="Sửa tài khoản"
+                            >
+                              <SquarePen size={13} strokeWidth={1.75} />
+                            </button>
                             <button type="button"
                               className="icon-btn"
                               onClick={() => refreshAccount(uid)}
@@ -600,9 +832,14 @@ export function App() {
                             </button>
                           </div>
 
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                          <button
+                            type="button"
+                            className={`btn btn-primary btn-sm ${phase === "launching" ? "is-busy" : ""}`}
+                            onClick={() => launchAccount(uid, acc)}
+                            disabled={phase === "launching"}
+                          >
                             <Play size={11} fill="currentColor" />
-                            <span>Launch</span>
+                            <span>{phase === "launching" ? "Đang chạy" : "Launch"}</span>
                           </button>
                         </div>
                       </div>
@@ -614,11 +851,14 @@ export function App() {
                   <table className="data-table">
                     <thead>
                       <tr>
+                        <th style={{ width: "36px" }} />
                         <th>Avatar</th>
                         <th>Display Name</th>
                         <th>Username</th>
                         <th>User ID</th>
                         <th>Robux</th>
+                        <th>Group</th>
+                        <th>Presence</th>
                         <th style={{ textAlign: "right" }}>Actions</th>
                       </tr>
                     </thead>
@@ -629,9 +869,16 @@ export function App() {
                         const username = acc.Username || `ID: ${uid}`;
                         const robux = acc.Fields?.Robux || "0";
                         const avatarUrl = acc.Fields?.AvatarUrl;
+                        const selected = selectedIds.includes(uid);
+                        const phase = launchPhases[uid];
 
                         return (
-                          <tr key={uid}>
+                          <tr key={uid} className={selected ? "selected" : ""}>
+                            <td>
+                              <button type="button" className="acct-check" onClick={() => toggleSelect(uid)}>
+                                {selected ? <SquareCheck size={15} strokeWidth={1.75} /> : <Square size={15} strokeWidth={1.75} />}
+                              </button>
+                            </td>
                             <td style={{ width: "48px" }}>
                               <div className="avatar-frame" style={{ width: "32px", height: "32px" }}>
                                 {avatarUrl ? (
@@ -652,17 +899,34 @@ export function App() {
                                 <span>{robux}</span>
                               </span>
                             </td>
+                            <td>
+                              <span className="group-chip">{groupLabel(acc)}</span>
+                            </td>
+                            <td>
+                              <span className={presenceClass(presence[uid] ?? 0)}>
+                                <span className="presence-dot" />
+                                {presenceLabel(presence[uid] ?? 0)}
+                              </span>
+                            </td>
                             <td style={{ textAlign: "right" }}>
                               <div style={{ display: "inline-flex", gap: "6px" }}>
+                                <button type="button" className="icon-btn" onClick={() => openEdit(acc)} title="Edit">
+                                  <SquarePen size={13} strokeWidth={1.75} />
+                                </button>
                                 <button type="button" className="icon-btn" onClick={() => refreshAccount(uid)} title="Refresh">
                                   <RefreshCw size={13} strokeWidth={1.75} />
                                 </button>
                                 <button type="button" className="icon-btn danger" onClick={() => removeAccount(uid, displayName)} title="Delete">
                                   <Trash2 size={13} strokeWidth={1.75} />
                                 </button>
-                                <button type="button" className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => launchAccount(uid, acc)}
+                                  disabled={phase === "launching"}
+                                >
                                   <Play size={10} fill="currentColor" />
-                                  <span>Launch</span>
+                                  <span>{phase === "launching" ? "..." : "Launch"}</span>
                                 </button>
                               </div>
                             </td>
@@ -973,6 +1237,18 @@ export function App() {
               />
             </div>
 
+            <div className="input-group">
+              <label className="input-label" htmlFor="ram-vault-password">Vault Password (chỉ cần nếu AccountData.json được khoá mật khẩu)</label>
+              <input
+                id="ram-vault-password"
+                className="input-field"
+                type="password"
+                placeholder="Để trống nếu file không có mật khẩu"
+                value={ramPassInput}
+                onChange={(e) => setRamPassInput(e.target.value)}
+              />
+            </div>
+
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
               <button type="button"
                 className="btn btn-secondary"
@@ -983,6 +1259,101 @@ export function App() {
               </button>
               <button type="button" className="btn btn-primary" onClick={handleImportRAM} disabled={submitting}>
                 {submitting ? "Importing..." : "Start Import"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editAccount && (
+        <div className="modal-overlay" onClick={() => !submitting && setEditAccount(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <SquarePen size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <h3>Edit Account</h3>
+              </div>
+              <button type="button"
+                className="icon-btn"
+                onClick={() => setEditAccount(null)}
+                disabled={submitting}
+              >
+                <X size={15} strokeWidth={1.75} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div className="input-group">
+                <label className="input-label" htmlFor="edit-alias">Alias / Label</label>
+                <input
+                  id="edit-alias"
+                  className="input-field"
+                  type="text"
+                  placeholder="Để trống sẽ dùng username"
+                  value={editAlias}
+                  onChange={(e) => setEditAlias(e.target.value)}
+                />
+              </div>
+
+              <div className="input-group">
+                <label className="input-label" htmlFor="edit-group">Group (tiền tố số để sắp xếp, ví dụ: 001 Main)</label>
+                <input
+                  id="edit-group"
+                  className="input-field"
+                  type="text"
+                  placeholder="Để trống = Default"
+                  value={editGroup}
+                  onChange={(e) => setEditGroup(e.target.value)}
+                />
+              </div>
+
+              <div className="input-group">
+                <label className="input-label" htmlFor="edit-description">Description</label>
+                <input
+                  id="edit-description"
+                  className="input-field"
+                  type="text"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                />
+              </div>
+
+              <div className="launch-grid">
+                <div className="input-group">
+                  <label className="input-label" htmlFor="edit-saved-place">Saved Place ID (tùy chọn)</label>
+                  <input
+                    id="edit-saved-place"
+                    className="input-field"
+                    type="text"
+                    placeholder="Dùng chung nếu để trống"
+                    value={editPlaceId}
+                    onChange={(e) => setEditPlaceId(e.target.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label className="input-label" htmlFor="edit-saved-job">Saved Job ID / VIP Link (tùy chọn)</label>
+                  <input
+                    id="edit-saved-job"
+                    className="input-field"
+                    type="text"
+                    placeholder="Dùng chung nếu để trống"
+                    value={editJobId}
+                    onChange={(e) => setEditJobId(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+              <button type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditAccount(null)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary" onClick={saveEdit} disabled={submitting}>
+                {submitting ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>

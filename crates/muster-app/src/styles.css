@@ -946,3 +946,102 @@ textarea.input-field {
     transform: translateY(0);
   }
 }
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.acct-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.acct-check:hover {
+  color: var(--accent-text);
+  background: var(--accent-subtle);
+}
+
+.account-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
+}
+
+.data-table tr.selected td {
+  background: var(--accent-subtle);
+}
+
+.account-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.group-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.08));
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.presence-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.presence-online .presence-dot {
+  background-color: #3b82f6;
+}
+
+.presence-ingame .presence-dot {
+  background-color: var(--accent);
+}
+
+.presence-instudio .presence-dot {
+  background-color: #a855f7;
+}
+
+.presence-offline .presence-dot {
+  background-color: var(--text-muted);
+}
+
+.btn.is-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
