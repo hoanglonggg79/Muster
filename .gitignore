@@ -32,7 +32,11 @@ __pycache__/
 
 # Tài liệu ngữ cảnh nội bộ & nguồn tham chiếu RAM cũ
 ROADMAP.md
+KE_HOACH-TIEP-THEO.md
 docs/
 RAM_Source/
 MusterData/
 *.backup-*
+
+# Vault thật dùng để test import — chứa cookie .ROBLOSECURITY, KHÔNG BAO GIỜ commit
+assets/*.json
