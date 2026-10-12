@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use muster_core::datetime::now_json_net;
+use muster_core::import;
 use muster_core::launch::windows::{SingletonMutex, launch_roblox_url};
 use muster_core::launch::{LaunchTarget, build_launch_url, generate_browser_tracker_id};
 use muster_core::models::Account;
@@ -44,13 +45,7 @@ pub struct AppState {
 impl AppState {
     fn save_accounts(&self) -> Result<(), String> {
         let store = self.store.lock().map_err(|e| e.to_string())?;
-        let accounts = store.accounts();
-        let json = serde_json::to_string_pretty(accounts).map_err(|e| e.to_string())?;
-        if let Some(parent) = self.data_file.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        std::fs::write(&self.data_file, json).map_err(|e| e.to_string())?;
-        Ok(())
+        vault::write_accounts(&self.data_file, store.accounts()).map_err(|e| e.to_string())
     }
 }
 
@@ -343,10 +338,7 @@ pub fn run() {
     #[cfg(debug_assertions)]
     export_bindings().expect("không ghi được bindings TypeScript");
 
-    let data_file = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("MusterData")
-        .join("AccountData.json");
+    let data_file = import::portable_account_file();
 
     let initial_accounts = if data_file.is_file() {
         vault::read_accounts_from_path(&data_file, None)

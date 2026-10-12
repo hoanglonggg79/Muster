@@ -1,7 +1,7 @@
 #[cfg(windows)]
 pub mod dpapi;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crypto_secretbox::XSalsa20Poly1305;
 use crypto_secretbox::aead::{AeadInPlace, KeyInit, generic_array::GenericArray};
@@ -277,6 +277,38 @@ pub fn seal_dpapi(plaintext: &[u8], scope: dpapi::Scope) -> Result<Vec<u8>, Vaul
     Ok(dpapi::protect(plaintext, DPAPI_ENTROPY, scope)?)
 }
 
+pub fn seal_default(plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
+    #[cfg(windows)]
+    {
+        seal_dpapi(plaintext, dpapi::Scope::LocalMachine)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = plaintext;
+        Err(VaultError::UnknownFormat)
+    }
+}
+
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), VaultError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = PathBuf::from(temp);
+
+    std::fs::write(&temp, bytes)?;
+    std::fs::rename(&temp, path)?;
+    Ok(())
+}
+
+pub fn write_accounts(path: &Path, accounts: &[Account]) -> Result<(), VaultError> {
+    let plaintext = accounts_to_bytes(accounts)?;
+    let sealed = seal_default(&plaintext)?;
+    write_atomically(path, &sealed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,5 +503,77 @@ mod tests {
             !text.contains("bi-mat"),
             "lo mat khau trong thong bao loi: {text}"
         );
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("muster-vault-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn sample_account() -> Account {
+        Account {
+            valid: true,
+            security_token: Some("COOKIE_BI_MAT_123".to_owned()),
+            username: Some("alice".to_owned()),
+            last_use: "2026-10-12T13:00:00".to_owned(),
+            alias: "alice".to_owned(),
+            description: String::new(),
+            password: String::new(),
+            group: Some("007 Bank".to_owned()),
+            user_id: 42,
+            fields: std::collections::BTreeMap::new(),
+            last_attempted_refresh: String::new(),
+            browser_tracker_id: Some("100000000001".to_owned()),
+            extra: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_accounts_seals_the_file_so_the_cookie_is_never_readable() {
+        let dir = temp_dir("seal");
+        let path = dir.join("AccountData.json");
+
+        write_accounts(&path, &[sample_account()]).expect("ghi vault");
+
+        let raw = std::fs::read(&path).expect("doc lai file");
+        assert_ne!(
+            raw.first(),
+            Some(&b'['),
+            "file ghi ra khong duoc la plain JSON"
+        );
+
+        let needle = b"COOKIE_BI_MAT_123";
+        assert!(
+            !raw.windows(needle.len()).any(|window| window == needle),
+            "cookie lo ra dang plaintext trong file ghi ra"
+        );
+
+        let (accounts, format) = read_accounts_from_path(&path, None).expect("doc lai vault");
+        assert_eq!(format, Format::Dpapi);
+        assert_eq!(accounts, vec![sample_account()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_accounts_creates_the_parent_directory_and_leaves_no_temp_file() {
+        let dir = temp_dir("mkdir");
+        let path = dir.join("nested").join("AccountData.json");
+
+        write_accounts(&path, &[]).expect("ghi vault");
+
+        assert!(path.is_file());
+
+        let leftover = dir.join("nested").join("AccountData.json.tmp");
+        assert!(
+            !leftover.exists(),
+            "con sot file tam: {}",
+            leftover.display()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

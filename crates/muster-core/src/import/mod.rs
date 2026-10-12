@@ -301,6 +301,20 @@ pub fn default_data_dir() -> PathBuf {
         .join(APP_DIR_NAME)
 }
 
+#[must_use]
+pub fn portable_data_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(APP_DIR_NAME)
+}
+
+#[must_use]
+pub fn portable_account_file() -> PathBuf {
+    portable_data_dir().join(ACCOUNT_FILE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,5 +653,17 @@ mod tests {
     #[test]
     fn default_data_dir_ends_with_the_app_directory_name() {
         assert!(default_data_dir().ends_with(APP_DIR_NAME));
+    }
+
+    #[test]
+    fn portable_data_dir_ends_with_the_app_directory_name() {
+        assert!(portable_data_dir().ends_with(APP_DIR_NAME));
+    }
+
+    #[test]
+    fn portable_account_file_points_at_the_account_data_file() {
+        let path = portable_account_file();
+        assert!(path.ends_with(ACCOUNT_FILE));
+        assert_eq!(path.parent(), Some(portable_data_dir().as_path()));
     }
 }
