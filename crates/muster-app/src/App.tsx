@@ -1,16 +1,58 @@
 import { useState, useEffect } from "react";
 import { commands } from "./bindings";
 import type { Account } from "./bindings";
+import {
+  LayoutDashboard,
+  Users,
+  Gamepad2,
+  Settings,
+  Play,
+  RefreshCw,
+  Trash2,
+  Plus,
+  Download,
+  Layers,
+  Zap,
+  Search,
+  LayoutGrid,
+  List,
+  Coins,
+  Shield,
+  X,
+  KeyRound,
+  Compass,
+} from "lucide-react";
+
+type NavigationTab = "overview" | "accounts" | "games" | "settings";
+
+// Preset game bookmarked for quick launch
+const PRESET_GAMES = [
+  { name: "Blox Fruits", placeId: "4483381587" },
+  { name: "Blade Ball", placeId: "13772394625" },
+  { name: "Deepwoken", placeId: "4111023553" },
+  { name: "Pet Simulator 99", placeId: "1537690962" },
+  { name: "Arsenal", placeId: "286090429" },
+  { name: "Murder Mystery 2", placeId: "142823291" },
+];
 
 export function App() {
+  const [activeTab, setActiveTab] = useState<NavigationTab>("accounts");
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+
+  // Launch state
   const [placeId, setPlaceId] = useState("4483381587");
   const [jobId, setJobId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+
+  // System status
   const [multiRoblox, setMultiRoblox] = useState(false);
   const [unlockFps, setUnlockFps] = useState(true);
   const [maxFps, setMaxFps] = useState(240);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [addTab, setAddTab] = useState<"cookie" | "credentials">("cookie");
@@ -33,6 +75,10 @@ export function App() {
       const res = await commands.accountList();
       if (res.status === "ok") {
         setAccounts(res.data);
+        if (res.data.length > 0 && selectedUserId === null) {
+          const firstUid = res.data[0]?.UserID;
+          if (firstUid) setSelectedUserId(firstUid);
+        }
       }
     } catch (e) {
       notify(`Lỗi tải danh sách: ${String(e)}`);
@@ -48,7 +94,7 @@ export function App() {
       const res = await commands.multiRobloxToggle(!multiRoblox);
       if (res.status === "ok") {
         setMultiRoblox(res.data);
-        notify(res.data ? "Đã BẬT Multi-Roblox instance" : "Đã TẮT Multi-Roblox");
+        notify(res.data ? "Đã kích hoạt Multi-Roblox" : "Đã tắt Multi-Roblox");
       }
     } catch (e) {
       notify(`Lỗi Multi-Roblox: ${String(e)}`);
@@ -59,6 +105,8 @@ export function App() {
     try {
       const res = await commands.patchApplyFps(newUnlock, fpsVal);
       if (res.status === "ok") {
+        setUnlockFps(newUnlock);
+        setMaxFps(fpsVal);
         notify(res.data);
       } else {
         notify(`Lỗi FPS: ${res.error}`);
@@ -91,7 +139,7 @@ export function App() {
     try {
       const res = await commands.accountRefresh(userId);
       if (res.status === "ok") {
-        notify(`Đã cập nhật: ${res.data.Username ?? "User"}`);
+        notify(`Đã cập nhật: ${res.data.Username ?? "Tài khoản"}`);
         refreshAccounts();
       } else {
         notify(`Lỗi làm mới: ${res.error}`);
@@ -102,7 +150,7 @@ export function App() {
   }
 
   async function removeAccount(userId: number, name: string) {
-    if (!confirm(`Bạn có chắc muốn xoá tài khoản ${name}?`)) return;
+    if (!confirm(`Xác nhận xoá tài khoản ${name}?`)) return;
     try {
       const res = await commands.accountRemove(userId);
       if (res.status === "ok") {
@@ -127,7 +175,7 @@ export function App() {
         }
         const res = await commands.accountAddCookie(cookieInput.trim(), aliasInput.trim() || null);
         if (res.status === "ok") {
-          notify(`Thêm thành công tài khoản ${res.data.Username ?? ""}`);
+          notify(`Thêm thành công ${res.data.Username ?? "tài khoản"}`);
           setShowAddModal(false);
           setCookieInput("");
           setAliasInput("");
@@ -166,7 +214,7 @@ export function App() {
 
   async function handleImportRAM() {
     if (!ramPathInput.trim()) {
-      notify("Vui lòng nhập đường dẫn thư mục RAM");
+      notify("Vui lòng nhập đường dẫn thư mục RAM cũ");
       return;
     }
     setSubmitting(true);
@@ -187,184 +235,621 @@ export function App() {
     }
   }
 
+  // Filtered accounts
+  const filteredAccounts = accounts.filter((acc) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    const name = (acc.Fields?.DisplayName || acc.Alias || acc.Username || "").toLowerCase();
+    const username = (acc.Username || "").toLowerCase();
+    const uid = String(acc.UserID || "");
+    return name.includes(q) || username.includes(q) || uid.includes(q);
+  });
+
+  // Calculate total Robux
+  const totalRobux = accounts.reduce((acc, curr) => {
+    const r = parseInt(curr.Fields?.Robux?.replace(/[^0-9]/g, "") || "0", 10);
+    return acc + (isNaN(r) ? 0 : r);
+  }, 0);
+
   return (
-    <div className="app">
-      <header className="navbar">
-        <div className="navbar__brand">
-          <div className="brand-icon">M</div>
-          <div className="brand-text">
-            <h1>MUSTER</h1>
-            <p>Roblox Account Manager & Launcher</p>
+    <div className="app-shell">
+      {/* 20% SIDEBAR */}
+      <aside className="sidebar">
+        <div>
+          <div className="sidebar__header">
+            <div className="brand-monogram">M</div>
+            <div className="brand-info">
+              <span className="brand-title">MUSTER</span>
+              <span className="brand-subtitle">ROBLOX MANAGER</span>
+            </div>
           </div>
+
+          <nav className="sidebar__nav">
+            <button
+              className={`nav-item ${activeTab === "overview" ? "active" : ""}`}
+              onClick={() => setActiveTab("overview")}
+            >
+              <div className="nav-item__left">
+                <LayoutDashboard size={16} strokeWidth={1.75} />
+                <span>Overview</span>
+              </div>
+            </button>
+
+            <button
+              className={`nav-item ${activeTab === "accounts" ? "active" : ""}`}
+              onClick={() => setActiveTab("accounts")}
+            >
+              <div className="nav-item__left">
+                <Users size={16} strokeWidth={1.75} />
+                <span>Accounts</span>
+              </div>
+              <span className="nav-badge">{accounts.length}</span>
+            </button>
+
+            <button
+              className={`nav-item ${activeTab === "games" ? "active" : ""}`}
+              onClick={() => setActiveTab("games")}
+            >
+              <div className="nav-item__left">
+                <Gamepad2 size={16} strokeWidth={1.75} />
+                <span>Game Search</span>
+              </div>
+            </button>
+
+            <button
+              className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
+              onClick={() => setActiveTab("settings")}
+            >
+              <div className="nav-item__left">
+                <Settings size={16} strokeWidth={1.75} />
+                <span>Settings</span>
+              </div>
+            </button>
+          </nav>
         </div>
 
-        <div className="navbar__actions">
-          <div
-            className={`toggle-badge ${multiRoblox ? "active" : ""}`}
-            onClick={toggleMultiRoblox}
-            title="Cho phép mở nhiều tài khoản Roblox cùng lúc"
-          >
-            <span className="status-dot"></span>
-            Multi-Roblox: {multiRoblox ? "BẬT" : "TẮT"}
+        {/* System Quick Status Footer */}
+        <div className="sidebar__footer">
+          <div className="system-status-card">
+            <div className="system-status-row">
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <span className={`status-dot ${multiRoblox ? "active" : ""}`}></span>
+                <span style={{ color: "var(--text-secondary)" }}>Multi-Roblox</span>
+              </div>
+              <button className="quick-toggle-btn" onClick={toggleMultiRoblox}>
+                {multiRoblox ? "ENABLED" : "OFF"}
+              </button>
+            </div>
+            <div className="system-status-row">
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <span className={`status-dot ${unlockFps ? "active" : ""}`}></span>
+                <span style={{ color: "var(--text-secondary)" }}>FPS Cap</span>
+              </div>
+              <span style={{ fontFamily: "monospace", color: unlockFps ? "var(--accent-text)" : "var(--text-muted)" }}>
+                {unlockFps ? `${maxFps} FPS` : "60 FPS"}
+              </span>
+            </div>
           </div>
-
-          <div
-            className={`toggle-badge ${unlockFps ? "active" : ""}`}
-            onClick={() => {
-              let nextUnlock = unlockFps;
-              let nextFps = maxFps;
-              if (!unlockFps) {
-                nextUnlock = true;
-                nextFps = 144;
-              } else if (maxFps === 144) {
-                nextFps = 240;
-              } else if (maxFps === 240) {
-                nextFps = 360;
-              } else {
-                nextUnlock = false;
-                nextFps = 60;
-              }
-              setUnlockFps(nextUnlock);
-              setMaxFps(nextFps);
-              applyFps(nextUnlock, nextFps);
-            }}
-            title="Nhấp để chuyển đổi: 144 -> 240 -> 360 -> Tắt"
-          >
-            <span className="status-dot"></span>
-            FPS: {unlockFps ? `${maxFps} FPS` : "Mặc định"}
-          </div>
-
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
-            Import RAM
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
-            + Thêm Tài Khoản
-          </button>
         </div>
-      </header>
+      </aside>
 
-      <main className="main-container">
-        <section className="launch-bar">
-          <div className="launch-bar__inputs">
-            <div className="input-group">
-              <label>Place ID (Mã Game)</label>
-              <input
-                className="input-field"
-                type="text"
-                value={placeId}
-                onChange={(e) => setPlaceId(e.target.value)}
-                placeholder="Ví dụ: 4483381587"
-              />
-            </div>
-            <div className="input-group">
-              <label>Job ID (Server ID - Tuỳ chọn)</label>
-              <input
-                className="input-field"
-                type="text"
-                value={jobId}
-                onChange={(e) => setJobId(e.target.value)}
-                placeholder="Để trống để vào server ngẫu nhiên"
-              />
-            </div>
+      {/* 80% WORKSPACE */}
+      <main className="workspace">
+        <header className="workspace__topbar">
+          <div className="topbar-title">
+            {activeTab === "overview" && (
+              <>
+                <LayoutDashboard size={18} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <span>Overview Dashboard</span>
+              </>
+            )}
+            {activeTab === "accounts" && (
+              <>
+                <Users size={18} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <span>Account Manager ({accounts.length})</span>
+              </>
+            )}
+            {activeTab === "games" && (
+              <>
+                <Gamepad2 size={18} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <span>Game Search & Fast Launch</span>
+              </>
+            )}
+            {activeTab === "settings" && (
+              <>
+                <Settings size={18} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <span>System Configuration</span>
+              </>
+            )}
           </div>
-        </section>
 
-        <section className="accounts-header">
-          <h2>
-            Tài Khoản <span className="count-badge">{accounts.length}</span>
-          </h2>
-          <button className="btn btn-secondary btn-sm" onClick={refreshAccounts}>
-            ↻ Làm Mới Danh Sách
-          </button>
-        </section>
-
-        {accounts.length === 0 ? (
-          <div className="empty-state">
-            <h3>Chưa có tài khoản nào</h3>
-            <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-              Hãy thêm tài khoản bằng cookie/mật khẩu hoặc nhập dữ liệu từ RAM cũ.
-            </p>
-            <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-              <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-                + Thêm Tài Khoản Mới
-              </button>
-              <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
-                Nhập từ RAM cũ
-              </button>
-            </div>
+          <div className="topbar-actions">
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
+              <Download size={13} strokeWidth={1.75} />
+              <span>Import RAM</span>
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+              <Plus size={13} strokeWidth={2} />
+              <span>Add Account</span>
+            </button>
           </div>
-        ) : (
-          <div className="accounts-grid">
-            {accounts.map((acc) => {
-              const uid = acc.UserID ?? 0;
-              const displayName = acc.Fields?.DisplayName || acc.Alias || acc.Username || "Roblox Player";
-              const username = acc.Username || `ID: ${uid}`;
-              const robux = acc.Fields?.Robux || "0";
-              const avatarUrl = acc.Fields?.AvatarUrl;
+        </header>
 
-              return (
-                <div key={uid} className="account-card">
-                  <div className="account-card__top">
-                    <div className="avatar-wrapper">
-                      {avatarUrl ? (
-                        <img className="avatar-img" src={avatarUrl} alt={username} />
-                      ) : (
-                        <span className="avatar-fallback">{displayName.charAt(0).toUpperCase()}</span>
-                      )}
-                    </div>
-                    <div className="account-info">
-                      <div className="account-name" title={displayName}>
-                        {displayName}
-                      </div>
-                      <div className="account-username">@{username}</div>
-                      <div className="robux-badge">
-                        <span>R$</span> {robux}
-                      </div>
-                    </div>
+        <section className="workspace__content">
+          {/* TAB 1: OVERVIEW */}
+          {activeTab === "overview" && (
+            <>
+              <div className="overview-metrics">
+                <div className="metric-card">
+                  <div className="metric-card__header">
+                    <span>Total Accounts</span>
+                    <Users size={15} strokeWidth={1.75} />
                   </div>
+                  <div className="metric-card__val">{accounts.length}</div>
+                  <div className="metric-card__sub">Stored in encrypted vault</div>
+                </div>
 
-                  <div className="account-card__bottom">
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => refreshAccount(uid)}
-                        title="Cập nhật lại Robux và Avatar"
-                      >
-                        ↻ Làm mới
-                      </button>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => removeAccount(uid, displayName)}
-                        title="Xoá khỏi danh sách"
-                      >
-                        Xoá
-                      </button>
-                    </div>
+                <div className="metric-card">
+                  <div className="metric-card__header">
+                    <span>Total Robux</span>
+                    <Coins size={15} strokeWidth={1.75} style={{ color: "var(--gold-robux)" }} />
+                  </div>
+                  <div className="metric-card__val" style={{ color: "var(--gold-robux)" }}>
+                    {totalRobux.toLocaleString()}
+                  </div>
+                  <div className="metric-card__sub">Aggregate balance</div>
+                </div>
 
-                    <div className="account-card__actions">
-                      <button className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
-                        ▶ Launch
-                      </button>
-                    </div>
+                <div className="metric-card">
+                  <div className="metric-card__header">
+                    <span>Multi-Instance</span>
+                    <Layers size={15} strokeWidth={1.75} />
+                  </div>
+                  <div className="metric-card__val" style={{ color: multiRoblox ? "var(--accent-text)" : "var(--text-muted)" }}>
+                    {multiRoblox ? "ACTIVE" : "STANDBY"}
+                  </div>
+                  <div className="metric-card__sub">Mutex patcher status</div>
+                </div>
+
+                <div className="metric-card">
+                  <div className="metric-card__header">
+                    <span>Target FPS</span>
+                    <Zap size={15} strokeWidth={1.75} />
+                  </div>
+                  <div className="metric-card__val">
+                    {unlockFps ? `${maxFps}` : "60"}
+                  </div>
+                  <div className="metric-card__sub">{unlockFps ? "Unlocked cap" : "Default engine limit"}</div>
+                </div>
+              </div>
+
+              {/* Quick Launch Panel */}
+              <div className="overview-banner">
+                <div className="overview-banner__title">
+                  <Compass size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                  <span>Quick Launcher</span>
+                </div>
+
+                <div className="launch-grid">
+                  <div className="input-group">
+                    <label className="input-label">Place ID (Game ID)</label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      value={placeId}
+                      onChange={(e) => setPlaceId(e.target.value)}
+                      placeholder="e.g. 4483381587"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label">Job ID (Server ID - Optional)</label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      value={jobId}
+                      onChange={(e) => setJobId(e.target.value)}
+                      placeholder="Leave empty for public matchmaking"
+                    />
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+
+                {accounts.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1 }}>
+                      <label className="input-label" style={{ whiteSpace: "nowrap" }}>Launch As:</label>
+                      <select
+                        className="input-field"
+                        style={{ flex: 1, padding: "6px 10px" }}
+                        value={selectedUserId ?? accounts[0]?.UserID ?? ""}
+                        onChange={(e) => setSelectedUserId(Number(e.target.value))}
+                      >
+                        {accounts.map((acc) => (
+                          <option key={acc.UserID ?? 0} value={acc.UserID ?? 0}>
+                            {acc.Fields?.DisplayName || acc.Alias || acc.Username || `ID: ${acc.UserID}`} (@{acc.Username})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => {
+                        const targetId = selectedUserId ?? accounts[0]?.UserID;
+                        if (targetId) launchAccount(targetId);
+                      }}
+                    >
+                      <Play size={13} fill="currentColor" />
+                      <span>Launch Instance</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* TAB 2: ACCOUNTS */}
+          {activeTab === "accounts" && (
+            <>
+              <div className="accounts-toolbar">
+                <div className="search-box">
+                  <Search size={14} strokeWidth={1.75} color="var(--text-muted)" />
+                  <input
+                    type="text"
+                    placeholder="Search accounts by username, alias, id..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button className="icon-btn" onClick={() => setSearchQuery("")}>
+                      <X size={12} strokeWidth={1.75} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="view-controls">
+                  <button
+                    className={`icon-btn ${viewMode === "grid" ? "active" : ""}`}
+                    onClick={() => setViewMode("grid")}
+                    title="Grid view"
+                  >
+                    <LayoutGrid size={15} strokeWidth={1.75} />
+                  </button>
+                  <button
+                    className={`icon-btn ${viewMode === "table" ? "active" : ""}`}
+                    onClick={() => setViewMode("table")}
+                    title="Table view"
+                  >
+                    <List size={15} strokeWidth={1.75} />
+                  </button>
+                  <div style={{ width: "1px", height: "16px", background: "var(--border-medium)", margin: "0 4px" }} />
+                  <button className="btn btn-secondary btn-sm" onClick={refreshAccounts} title="Reload accounts">
+                    <RefreshCw size={12} strokeWidth={1.75} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {filteredAccounts.length === 0 ? (
+                <div className="empty-state">
+                  <Shield size={32} strokeWidth={1.5} color="var(--text-muted)" />
+                  <h3>No accounts found</h3>
+                  <p>
+                    {searchQuery
+                      ? "No account matches your search query."
+                      : "Add accounts via .ROBLOSECURITY cookie or import existing accounts from RAM."}
+                  </p>
+                  <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
+                      <Plus size={13} strokeWidth={2} />
+                      <span>Add New Account</span>
+                    </button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setShowImportModal(true)}>
+                      <Download size={13} strokeWidth={1.75} />
+                      <span>Import From RAM</span>
+                    </button>
+                  </div>
+                </div>
+              ) : viewMode === "grid" ? (
+                <div className="accounts-grid">
+                  {filteredAccounts.map((acc) => {
+                    const uid = acc.UserID ?? 0;
+                    const displayName = acc.Fields?.DisplayName || acc.Alias || acc.Username || "Roblox Player";
+                    const username = acc.Username || `ID: ${uid}`;
+                    const robux = acc.Fields?.Robux || "0";
+                    const avatarUrl = acc.Fields?.AvatarUrl;
+
+                    return (
+                      <div key={uid} className="account-card">
+                        <div className="account-card__header">
+                          <div className="avatar-frame">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt={username} />
+                            ) : (
+                              <span className="avatar-fallback-text">
+                                {displayName.charAt(0).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="account-details">
+                            <span className="account-displayname" title={displayName}>
+                              {displayName}
+                            </span>
+                            <span className="account-username">@{username}</span>
+                            <span className="account-robux">
+                              <Coins size={11} strokeWidth={1.75} />
+                              <span>{robux}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="account-card__footer">
+                          <div className="card-action-group">
+                            <button
+                              className="icon-btn"
+                              onClick={() => refreshAccount(uid)}
+                              title="Refresh profile & Robux"
+                            >
+                              <RefreshCw size={13} strokeWidth={1.75} />
+                            </button>
+                            <button
+                              className="icon-btn danger"
+                              onClick={() => removeAccount(uid, displayName)}
+                              title="Remove account"
+                            >
+                              <Trash2 size={13} strokeWidth={1.75} />
+                            </button>
+                          </div>
+
+                          <button className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                            <Play size={11} fill="currentColor" />
+                            <span>Launch</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Avatar</th>
+                        <th>Display Name</th>
+                        <th>Username</th>
+                        <th>User ID</th>
+                        <th>Robux</th>
+                        <th style={{ textAlign: "right" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAccounts.map((acc) => {
+                        const uid = acc.UserID ?? 0;
+                        const displayName = acc.Fields?.DisplayName || acc.Alias || acc.Username || "Roblox Player";
+                        const username = acc.Username || `ID: ${uid}`;
+                        const robux = acc.Fields?.Robux || "0";
+                        const avatarUrl = acc.Fields?.AvatarUrl;
+
+                        return (
+                          <tr key={uid}>
+                            <td style={{ width: "48px" }}>
+                              <div className="avatar-frame" style={{ width: "32px", height: "32px" }}>
+                                {avatarUrl ? (
+                                  <img src={avatarUrl} alt={username} />
+                                ) : (
+                                  <span className="avatar-fallback-text" style={{ fontSize: "11px" }}>
+                                    {displayName.charAt(0).toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ fontWeight: 600 }}>{displayName}</td>
+                            <td style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>@{username}</td>
+                            <td style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>{uid}</td>
+                            <td>
+                              <span className="account-robux">
+                                <Coins size={11} strokeWidth={1.75} />
+                                <span>{robux}</span>
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              <div style={{ display: "inline-flex", gap: "6px" }}>
+                                <button className="icon-btn" onClick={() => refreshAccount(uid)} title="Refresh">
+                                  <RefreshCw size={13} strokeWidth={1.75} />
+                                </button>
+                                <button className="icon-btn danger" onClick={() => removeAccount(uid, displayName)} title="Delete">
+                                  <Trash2 size={13} strokeWidth={1.75} />
+                                </button>
+                                <button className="btn btn-primary btn-sm" onClick={() => launchAccount(uid)}>
+                                  <Play size={10} fill="currentColor" />
+                                  <span>Launch</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* TAB 3: GAME SEARCH / PLACE EXPLORER */}
+          {activeTab === "games" && (
+            <>
+              <div className="launch-bar">
+                <div className="overview-banner__title">
+                  <Gamepad2 size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                  <span>Target Game Configuration</span>
+                </div>
+
+                <div className="launch-grid">
+                  <div className="input-group">
+                    <label className="input-label">Place ID (Roblox Experience ID)</label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      value={placeId}
+                      onChange={(e) => setPlaceId(e.target.value)}
+                      placeholder="e.g. 4483381587"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label className="input-label">Job ID (Specific Server Instance)</label>
+                    <input
+                      className="input-field"
+                      type="text"
+                      value={jobId}
+                      onChange={(e) => setJobId(e.target.value)}
+                      placeholder="Leave empty for public join"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "6px" }}>
+                  <label className="input-label" style={{ marginBottom: "8px", display: "block" }}>
+                    Quick Bookmarks
+                  </label>
+                  <div className="game-bookmarks">
+                    {PRESET_GAMES.map((game) => (
+                      <div
+                        key={game.placeId}
+                        className={`game-bookmark-chip ${placeId === game.placeId ? "active" : ""}`}
+                        onClick={() => setPlaceId(game.placeId)}
+                      >
+                        <span className="bookmark-title">{game.name}</span>
+                        <span className="bookmark-id">{game.placeId}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {accounts.length > 0 && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px" }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => {
+                        const targetId = selectedUserId ?? accounts[0]?.UserID;
+                        if (targetId) launchAccount(targetId);
+                      }}
+                    >
+                      <Play size={13} fill="currentColor" />
+                      <span>Launch Game Now</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* TAB 4: SETTINGS */}
+          {activeTab === "settings" && (
+            <>
+              <div className="settings-section">
+                <span className="settings-section__title">Roblox Client & Engine Tweaks</span>
+
+                <div className="settings-row">
+                  <div className="settings-info">
+                    <span className="settings-label">Multi-Roblox Instance</span>
+                    <span className="settings-desc">
+                      Bypasses single-instance Windows mutex to allow running multiple Roblox clients concurrently.
+                    </span>
+                  </div>
+                  <button
+                    className={`btn ${multiRoblox ? "btn-primary" : "btn-secondary"}`}
+                    onClick={toggleMultiRoblox}
+                  >
+                    {multiRoblox ? "ENABLED" : "DISABLED"}
+                  </button>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-info">
+                    <span className="settings-label">FPS Unlocker Cap</span>
+                    <span className="settings-desc">
+                      Patches ClientAppSettings.json to uncap Roblox framerate above standard 60 FPS.
+                    </span>
+                  </div>
+                  <div className="fps-chip-group">
+                    <button
+                      className={`fps-chip ${!unlockFps ? "active" : ""}`}
+                      onClick={() => applyFps(false, 60)}
+                    >
+                      60 (Default)
+                    </button>
+                    <button
+                      className={`fps-chip ${unlockFps && maxFps === 144 ? "active" : ""}`}
+                      onClick={() => applyFps(true, 144)}
+                    >
+                      144 FPS
+                    </button>
+                    <button
+                      className={`fps-chip ${unlockFps && maxFps === 240 ? "active" : ""}`}
+                      onClick={() => applyFps(true, 240)}
+                    >
+                      240 FPS
+                    </button>
+                    <button
+                      className={`fps-chip ${unlockFps && maxFps === 360 ? "active" : ""}`}
+                      onClick={() => applyFps(true, 360)}
+                    >
+                      360 FPS
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <span className="settings-section__title">Vault & Data Migration</span>
+
+                <div className="settings-row">
+                  <div className="settings-info">
+                    <span className="settings-label">Import from RAM (Roblox Account Manager)</span>
+                    <span className="settings-desc">
+                      Migrate accounts from legacy C# Roblox-Account-Manager AccountData.json directory.
+                    </span>
+                  </div>
+                  <button className="btn btn-secondary" onClick={() => setShowImportModal(true)}>
+                    <Download size={13} strokeWidth={1.75} />
+                    <span>Migrate Accounts</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <span className="settings-section__title">Application Info</span>
+                <div className="settings-row">
+                  <div className="settings-info">
+                    <span className="settings-label">Engine Core</span>
+                    <span className="settings-desc">Rust 2024 / Tauri v2 / Argon2i Encryption</span>
+                  </div>
+                  <span style={{ fontFamily: "monospace", color: "var(--text-muted)", fontSize: "11px" }}>
+                    v0.1.0-alpha
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </main>
 
+      {/* ADD ACCOUNT MODAL */}
       {showAddModal && (
         <div className="modal-overlay" onClick={() => !submitting && setShowAddModal(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Thêm Tài Khoản</h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <KeyRound size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <h3>Add Account</h3>
+              </div>
               <button
-                className="btn btn-secondary btn-sm"
+                className="icon-btn"
                 onClick={() => setShowAddModal(false)}
                 disabled={submitting}
               >
-                ✕
+                <X size={15} strokeWidth={1.75} />
               </button>
             </div>
 
@@ -379,28 +864,28 @@ export function App() {
                 className={`modal-tab ${addTab === "credentials" ? "active" : ""}`}
                 onClick={() => setAddTab("credentials")}
               >
-                Tên & Mật khẩu (API)
+                Credentials (Username & Password)
               </div>
             </div>
 
             {addTab === "cookie" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div className="input-group">
-                  <label>Cookie .ROBLOSECURITY</label>
+                  <label className="input-label">Cookie Value</label>
                   <textarea
                     className="input-field"
                     rows={4}
-                    placeholder="_|WARNING:-DO-NOT-SHARE-THIS..."
+                    placeholder="_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you..."
                     value={cookieInput}
                     onChange={(e) => setCookieInput(e.target.value)}
                   />
                 </div>
                 <div className="input-group">
-                  <label>Tên gợi nhớ (Alias - Tuỳ chọn)</label>
+                  <label className="input-label">Alias / Account Label (Optional)</label>
                   <input
                     className="input-field"
                     type="text"
-                    placeholder="Ví dụ: Acc chính, Farm Acc..."
+                    placeholder="e.g. Main Farm, Trading Alt..."
                     value={aliasInput}
                     onChange={(e) => setAliasInput(e.target.value)}
                   />
@@ -409,31 +894,31 @@ export function App() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div className="input-group">
-                  <label>Username / Email / Số điện thoại</label>
+                  <label className="input-label">Username / Email / Phone</label>
                   <input
                     className="input-field"
                     type="text"
-                    placeholder="Tên đăng nhập Roblox"
+                    placeholder="Roblox login identity"
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
                   />
                 </div>
                 <div className="input-group">
-                  <label>Mật khẩu</label>
+                  <label className="input-label">Password</label>
                   <input
                     className="input-field"
                     type="password"
-                    placeholder="Mật khẩu"
+                    placeholder="Account password"
                     value={passInput}
                     onChange={(e) => setPassInput(e.target.value)}
                   />
                 </div>
                 <div className="input-group">
-                  <label>Tên gợi nhớ (Alias - Tuỳ chọn)</label>
+                  <label className="input-label">Alias / Label (Optional)</label>
                   <input
                     className="input-field"
                     type="text"
-                    placeholder="Ví dụ: Alt 1"
+                    placeholder="e.g. Alt 1"
                     value={aliasInput}
                     onChange={(e) => setAliasInput(e.target.value)}
                   />
@@ -441,50 +926,74 @@ export function App() {
               </div>
             )}
 
-            <button className="btn btn-primary" onClick={handleAddAccount} disabled={submitting}>
-              {submitting ? "Đang xử lý..." : "Xác nhận & Thêm"}
-            </button>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowAddModal(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handleAddAccount} disabled={submitting}>
+                {submitting ? "Processing..." : "Confirm & Save"}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* IMPORT RAM MODAL */}
       {showImportModal && (
         <div className="modal-overlay" onClick={() => !submitting && setShowImportModal(false)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Nhập dữ liệu từ RAM (Roblox Account Manager)</h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Download size={16} strokeWidth={1.75} style={{ color: "var(--accent)" }} />
+                <h3>Import from RAM Directory</h3>
+              </div>
               <button
-                className="btn btn-secondary btn-sm"
+                className="icon-btn"
                 onClick={() => setShowImportModal(false)}
                 disabled={submitting}
               >
-                ✕
+                <X size={15} strokeWidth={1.75} />
               </button>
             </div>
 
             <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>
-              Nhập đường dẫn tới thư mục cài đặt của RAM cũ (nơi chứa file AccountData.json).
+              Specify the path to your legacy Roblox Account Manager folder where AccountData.json is stored.
             </p>
 
             <div className="input-group">
-              <label>Đường dẫn thư mục RAM</label>
+              <label className="input-label">RAM Directory Path</label>
               <input
                 className="input-field"
                 type="text"
-                placeholder="C:\Users\...\Roblox-Account-Manager"
+                placeholder="C:\Users\Username\Roblox-Account-Manager"
                 value={ramPathInput}
                 onChange={(e) => setRamPathInput(e.target.value)}
               />
             </div>
 
-            <button className="btn btn-primary" onClick={handleImportRAM} disabled={submitting}>
-              {submitting ? "Đang nhập..." : "Nhập Dữ Liệu"}
-            </button>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowImportModal(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={handleImportRAM} disabled={submitting}>
+                {submitting ? "Importing..." : "Start Import"}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* TOAST NOTIFICATION */}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
+export default App;

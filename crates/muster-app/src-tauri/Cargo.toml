@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Tauri 2 desktop shell for Muster. Contains only command wrappers — all logic lives in muster-core."
+default-run = "muster-app"
 
 [lib]
 name = "muster_app_lib"
