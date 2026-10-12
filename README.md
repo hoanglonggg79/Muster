@@ -10,9 +10,9 @@ Windows. Rust + Tauri 2 + React + TypeScript. Giấy phép **GPL-3.0**.
 
 ## Trạng thái
 
-**M0 xong hoàn toàn (0.1 → 0.8).** **M1 xong phần lõi + GUI đầu tiên chạy được.**
-Việc tiếp theo: đóng M1 (auth retry/rate limit, presence, VIP server) rồi sang M2 — xem
-`ROADMAP.md` mục 6.
+**M0 xong hoàn toàn (0.1 → 0.8).** **M1 ĐÃ ĐÓNG (2026-10-12):** auth retry/rate limit, presence,
+VIP server, auto-close, import vault password-locked, UI launch hàng loạt + sửa account — xem
+`ROADMAP.md` mục 6-M1. Việc tiếp theo: sang **M2** (parity đầy đủ) + nâng nền UI lên stack §3.3.
 
 | Bước | Việc | Trạng thái |
 | :--- | :--- | :--- |
@@ -24,6 +24,11 @@ Việc tiếp theo: đóng M1 (auth retry/rate limit, presence, VIP server) rồ
 | 0.6 | `core::settings` + migration `RAMSettings.ini` | ✅ xong |
 | 0.7 | Wizard nhập dữ liệu từ RAM | ✅ xong (CLI) |
 | 0.8 | `tracing` + redaction + CI | ✅ xong |
+| M1 | `roblox::auth` (CSRF/ticket/login API + retry/rate limit + phân loại lỗi) | ✅ xong |
+| M1 | `roblox::api` (user/robux/avatar) + `roblox::presence` + `roblox::vip` | ✅ xong |
+| M1 | `launch` (URL, legacy, mutex, auto-close) + `patch` + `datetime` giờ địa phương | ✅ xong |
+| M1 | GUI Tauri 2 + React: 13 command, launch đơn/hàng loạt, sửa account, import có mật khẩu | ✅ xong |
+| M1 | Nghiệm thu chạy thật (5 account song song, không kick) | ⏳ chờ chạy thật |
 
 Nghiệm thu M0 đã đạt: `muster-cli import` đọc đúng số tài khoản, sao lưu ZIP trước khi ghi, và
 **không sửa file gốc của RAM** (đã kiểm bằng so hash trước/sau).
@@ -38,6 +43,9 @@ crates/
 │     ├─ vault/        4 nhánh AccountData.json + DPAPI
 │     ├─ settings/     config + parser RAMSettings.ini
 │     ├─ import/       quét bản cài RAM, sao lưu ZIP, chuyển dữ liệu
+│     ├─ launch/       URL/legacy launch, mutex, auto-close
+│     ├─ patch/        ClientAppSettings.json + FPS unlocker
+│     ├─ roblox/       account, api, auth, presence, vip, limiter, http
 │     └─ logging.rs    tracing + khử secret khỏi log
 ├─ muster-api/         local HTTP API (22 route của RAM) + WebSocket
 ├─ muster-cli/         chạy headless, không cần GUI
@@ -77,7 +85,7 @@ cd crates/muster-app
 npm install
 npm run tauri dev              # chạy app desktop
 npm run typecheck
-npm run lint                   # ESLint
+npm run lint                   # Biome (KHÔNG phải ESLint — typescript-eslint xung đột peer với TS 7)
 npm run codegen                # sinh lại src/bindings.ts từ code Rust
 ```
 
