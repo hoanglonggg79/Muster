@@ -83,7 +83,36 @@ impl AccountStore {
         })
     }
 
-    pub fn add(&mut self, account: Account) -> Result<(AddOutcome, usize), AccountError> {
+    pub fn add(&mut self, mut account: Account) -> Result<(AddOutcome, usize), AccountError> {
+        if !account.valid {
+            return Err(AccountError::NotValid);
+        }
+
+        account.last_use = crate::datetime::now_local_json_net();
+
+        if account.user_id != 0 {
+            if let Some(index) = self
+                .accounts
+                .iter()
+                .position(|candidate| candidate.user_id == account.user_id)
+            {
+                let existing = &mut self.accounts[index];
+                existing.security_token = account.security_token;
+                existing.password = account.password;
+                existing.last_use = account.last_use;
+
+                return Ok((AddOutcome::MergedIntoExisting, index));
+            }
+        }
+
+        self.accounts.push(account);
+        Ok((AddOutcome::Added, self.accounts.len() - 1))
+    }
+
+    pub fn import_account(
+        &mut self,
+        account: Account,
+    ) -> Result<(AddOutcome, usize), AccountError> {
         if !account.valid {
             return Err(AccountError::NotValid);
         }
@@ -97,7 +126,6 @@ impl AccountStore {
                 let existing = &mut self.accounts[index];
                 existing.security_token = account.security_token;
                 existing.password = account.password;
-                existing.last_use = account.last_use;
 
                 return Ok((AddOutcome::MergedIntoExisting, index));
             }
@@ -149,14 +177,54 @@ impl AccountStore {
     }
 
     pub fn sort_by_group(&mut self) {
-        self.accounts
-            .sort_by(|left, right| left.group_or_default().cmp(right.group_or_default()));
+        self.accounts.sort_by(|left, right| {
+            let left_key = group_sort_key(left.group_or_default());
+            let right_key = group_sort_key(right.group_or_default());
+
+            left_key
+                .0
+                .unwrap_or(u32::MAX)
+                .cmp(&right_key.0.unwrap_or(u32::MAX))
+                .then_with(|| left_key.1.cmp(right_key.1))
+                .then_with(|| left.group_or_default().cmp(right.group_or_default()))
+        });
     }
 
     #[must_use]
     pub fn into_accounts(self) -> Vec<Account> {
         self.accounts
     }
+}
+
+#[must_use]
+pub fn group_sort_key(group: &str) -> (Option<u32>, &str) {
+    let bytes = group.as_bytes();
+    let mut index = 0;
+    let mut digits = 0;
+
+    while index < bytes.len() && digits < 3 && bytes[index].is_ascii_digit() {
+        index += 1;
+        digits += 1;
+    }
+
+    if digits == 0 {
+        return (None, group);
+    }
+
+    let Some(number) = group[..index].parse::<u32>().ok() else {
+        return (None, group);
+    };
+
+    if index < bytes.len() && bytes[index] == b' ' {
+        index += 1;
+    }
+
+    (Some(number), &group[index..])
+}
+
+#[must_use]
+pub fn group_display_name(group: &str) -> &str {
+    group_sort_key(group).1
 }
 
 impl FromIterator<Account> for AccountStore {
@@ -248,7 +316,45 @@ mod tests {
         let merged = store.get(0).expect("lấy");
         assert_eq!(merged.cookie(), Some("COOKIE-MOI"));
         assert_eq!(merged.password, "mat-khau-moi");
-        assert_eq!(merged.last_use, "2026-10-11T10:00:00");
+        assert_ne!(
+            merged.last_use, "2026-10-11T10:00:00",
+            "RAM dóng dấ DateTime.Now, khong lay last_use cua account gui vao"
+        );
+        assert!(merged.last_use.len() >= 19, "phai la moc thoi gian moi");
+    }
+
+    #[test]
+    fn importing_keeps_the_last_use_stamped_by_ram() {
+        let mut store = AccountStore::new();
+        let mut imported = account("alice", 100, None);
+        imported.last_use = "2026-09-28T21:14:03.512".to_owned();
+
+        store.import_account(imported).expect("nhập");
+
+        let stored = store.get(0).expect("lấy");
+        assert_eq!(
+            stored.last_use, "2026-09-28T21:14:03.512",
+            "nhập du lieu RAM phai giu nguyen last_use goc"
+        );
+    }
+
+    #[test]
+    fn importing_the_same_user_id_updates_the_credentials_only() {
+        let mut store = AccountStore::new();
+        let mut original = account("alice", 100, Some("007 Bank"));
+        original.last_use = "2026-09-28T21:14:03.512".to_owned();
+        original.alias = "Alice (main)".to_owned();
+        store.import_account(original).expect("nhập lần nhất");
+
+        let mut again = account("alice", 100, None);
+        again.security_token = Some("COOKIE-MOI".to_owned());
+        store.import_account(again).expect("nhập lần hai");
+
+        let merged = store.get(0).expect("lấy");
+        assert_eq!(merged.cookie(), Some("COOKIE-MOI"));
+        assert_eq!(merged.last_use, "2026-09-28T21:14:03.512");
+        assert_eq!(merged.group.as_deref(), Some("007 Bank"));
+        assert_eq!(merged.alias, "Alice (main)");
     }
 
     #[test]
@@ -403,6 +509,43 @@ mod tests {
             ],
             "trong cung nhom phai giu nguyen thu tu"
         );
+    }
+
+    #[test]
+    fn groups_with_a_number_prefix_sort_by_their_number() {
+        let mut store = AccountStore::from_accounts(vec![
+            account("a", 1, Some("10 Apple")),
+            account("b", 2, Some("9 Banana")),
+            account("c", 3, Some("007 Bank")),
+            account("d", 4, Some("1Main")),
+            account("e", 5, None),
+        ]);
+
+        store.sort_by_group();
+
+        let groups: Vec<&str> = store.iter().map(|a| a.group_or_default()).collect();
+        assert_eq!(
+            groups,
+            ["1Main", "007 Bank", "9 Banana", "10 Apple", "Default"],
+            "so phai duoc so sanh nhu so, khong phai nhu chuoi"
+        );
+    }
+
+    #[test]
+    fn the_group_prefix_is_hidden_from_the_display_name_like_ram_does() {
+        assert_eq!(group_display_name("1Main"), "Main");
+        assert_eq!(group_display_name("007 Bank"), "Bank");
+        assert_eq!(group_display_name("Default"), "Default");
+        assert_eq!(group_display_name("001 Apple"), "Apple");
+        assert_eq!(group_display_name("12abc"), "abc");
+    }
+
+    #[test]
+    fn only_three_leading_digits_count_as_a_prefix() {
+        assert_eq!(group_sort_key("1234 Bank"), (Some(123), "4 Bank"));
+        assert_eq!(group_sort_key("9999999x"), (Some(999), "9999x"));
+        assert_eq!(group_sort_key("Bank"), (None, "Bank"));
+        assert_eq!(group_sort_key("007"), (Some(7), ""));
     }
 
     #[test]

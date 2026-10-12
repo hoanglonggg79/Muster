@@ -10,16 +10,15 @@ pub fn format_json_net(unix_seconds: i64, subsec_nanos: u32) -> String {
     let minute = (seconds_of_day % 3_600) / 60;
     let second = seconds_of_day % 60;
 
-    let mut out = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
-
-    let ticks = (subsec_nanos.min(999_999_999)) / 100;
-    if ticks != 0 {
-        let fraction = format!("{ticks:07}");
-        out.push('.');
-        out.push_str(fraction.trim_end_matches('0'));
-    }
-
-    out
+    format_parts(
+        year,
+        month,
+        day,
+        hour as u32,
+        minute as u32,
+        second as u32,
+        subsec_nanos.min(999_999_999) / 100,
+    )
 }
 
 #[must_use]
@@ -28,6 +27,78 @@ pub fn now_json_net() -> String {
         Ok(delta) => format_json_net(delta.as_secs() as i64, delta.subsec_nanos()),
         Err(_) => format_json_net(0, 0),
     }
+}
+
+#[cfg(windows)]
+#[must_use]
+pub fn now_local_json_net() -> String {
+    #[repr(C)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        milliseconds: u16,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetLocalTime(out: *mut SystemTime);
+    }
+
+    let mut local = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
+
+    unsafe {
+        GetLocalTime(&mut local);
+    }
+
+    format_parts(
+        i64::from(local.year),
+        u32::from(local.month),
+        u32::from(local.day),
+        u32::from(local.hour),
+        u32::from(local.minute),
+        u32::from(local.second),
+        u32::from(local.milliseconds) * 10_000,
+    )
+}
+
+#[cfg(not(windows))]
+#[must_use]
+pub fn now_local_json_net() -> String {
+    now_json_net()
+}
+
+fn format_parts(
+    year: i64,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    subsec_ticks: u32,
+) -> String {
+    let mut out = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
+
+    if subsec_ticks != 0 {
+        let fraction = format!("{subsec_ticks:07}");
+        out.push('.');
+        out.push_str(fraction.trim_end_matches('0'));
+    }
+
+    out
 }
 
 #[must_use]
@@ -130,5 +201,38 @@ mod tests {
         assert_eq!(now.as_bytes()[10], b'T');
         assert_eq!(now.as_bytes()[13], b':');
         assert_eq!(now.as_bytes()[16], b':');
+    }
+
+    fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+        let year = if month <= 2 { year - 1 } else { year };
+        let era = if year >= 0 { year } else { year - 399 } / 400;
+        let year_of_era = year - era * 400;
+        let month_prime = if month > 2 { month - 3 } else { month + 9 };
+        let day_of_year = (153 * i64::from(month_prime) + 2) / 5 + i64::from(day) - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        era * 146_097 + day_of_era - 719_468
+    }
+
+    fn parse_json_net_to_unix(text: &str) -> i64 {
+        let date = &text[..10];
+        let time = &text[11..19.min(text.len())];
+        let year: i64 = date[..4].parse().expect("nam");
+        let month: u32 = date[5..7].parse().expect("thang");
+        let day: u32 = date[8..10].parse().expect("ngay");
+        let hour: i64 = time[0..2].parse().expect("gio");
+        let minute: i64 = time[3..5].parse().expect("phut");
+        let second: i64 = time[6..8].parse().expect("giay");
+        days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second
+    }
+
+    #[test]
+    fn the_local_clock_stays_within_any_real_timezone_of_utc() {
+        let local = parse_json_net_to_unix(&now_local_json_net());
+        let utc = parse_json_net_to_unix(&now_json_net());
+
+        assert!(
+            (local - utc).abs() <= 14 * 3_600,
+            "gio dia phuong lech qua xa so voi UTC: {local} vs {utc}"
+        );
     }
 }

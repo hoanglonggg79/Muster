@@ -37,7 +37,7 @@ pub struct PatchSettings {
 
     pub unlock_fps: bool,
 
-    pub max_fps_value: u32,
+    pub max_fps_value: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,19 +111,18 @@ pub fn plan_client_settings(
         return ClientSettingsPlan::Leave;
     }
 
+    let fps = settings.max_fps_value.unwrap_or(DEFAULT_UNLOCK_FPS);
+
     if let Some(text) = existing {
         if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text) {
             if let Some(object) = value.as_object_mut() {
-                object.insert(
-                    FPS_KEY.to_owned(),
-                    serde_json::Value::from(settings.max_fps_value),
-                );
+                object.insert(FPS_KEY.to_owned(), serde_json::Value::from(fps));
                 return ClientSettingsPlan::Write(value.to_string());
             }
         }
     }
 
-    ClientSettingsPlan::Write(format!("{{\"{FPS_KEY}\":{}}}", settings.max_fps_value))
+    ClientSettingsPlan::Write(format!("{{\"{FPS_KEY}\":{fps}}}"))
 }
 
 pub fn apply_client_settings(
@@ -337,7 +336,7 @@ mod tests {
         assert!(path.ends_with(Path::new(CLIENT_SETTINGS_DIR).join(CLIENT_APP_SETTINGS_FILE)));
     }
 
-    fn patch_settings(custom: Option<&str>, unlock_fps: bool, fps: u32) -> PatchSettings {
+    fn patch_settings(custom: Option<&str>, unlock_fps: bool, fps: Option<u32>) -> PatchSettings {
         PatchSettings {
             custom_client_settings: custom.map(PathBuf::from),
             unlock_fps,
@@ -347,13 +346,13 @@ mod tests {
 
     #[test]
     fn nothing_is_written_when_both_switches_are_off() {
-        let plan = plan_client_settings(None, &patch_settings(None, false, 120));
+        let plan = plan_client_settings(None, &patch_settings(None, false, Some(120)));
         assert_eq!(plan, ClientSettingsPlan::Leave);
     }
 
     #[test]
     fn a_missing_file_with_unlock_fps_on_gets_the_minimal_json() {
-        let plan = plan_client_settings(None, &patch_settings(None, true, 240));
+        let plan = plan_client_settings(None, &patch_settings(None, true, Some(240)));
         assert_eq!(
             plan,
             ClientSettingsPlan::Write("{\"DFIntTaskSchedulerTargetFps\":240}".to_owned())
@@ -361,9 +360,36 @@ mod tests {
     }
 
     #[test]
+    fn no_fps_value_falls_back_to_240_like_ram_does() {
+        let broken = plan_client_settings(
+            Some("day khong phai JSON"),
+            &patch_settings(None, true, None),
+        );
+        assert_eq!(
+            broken,
+            ClientSettingsPlan::Write("{\"DFIntTaskSchedulerTargetFps\":240}".to_owned()),
+            "JSON hong phai ghi 240, khong phai 0"
+        );
+
+        let existing = plan_client_settings(
+            Some(r#"{"SomeOtherFlag":true}"#),
+            &patch_settings(None, true, None),
+        );
+        let ClientSettingsPlan::Write(text) = existing else {
+            panic!("phai la Write");
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).expect("JSON hợp lệ");
+        assert_eq!(
+            value["DFIntTaskSchedulerTargetFps"],
+            serde_json::Value::from(240u32)
+        );
+        assert_eq!(value["SomeOtherFlag"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
     fn an_existing_json_keeps_its_other_keys() {
         let existing = r#"{"SomeOtherFlag":true,"DFIntTaskSchedulerTargetFps":60}"#;
-        let plan = plan_client_settings(Some(existing), &patch_settings(None, true, 144));
+        let plan = plan_client_settings(Some(existing), &patch_settings(None, true, Some(144)));
 
         let ClientSettingsPlan::Write(text) = plan else {
             panic!("phai la Write");
@@ -379,8 +405,10 @@ mod tests {
 
     #[test]
     fn broken_json_falls_back_to_the_minimal_document() {
-        let plan =
-            plan_client_settings(Some("day khong phai JSON"), &patch_settings(None, true, 90));
+        let plan = plan_client_settings(
+            Some("day khong phai JSON"),
+            &patch_settings(None, true, Some(90)),
+        );
         assert_eq!(
             plan,
             ClientSettingsPlan::Write("{\"DFIntTaskSchedulerTargetFps\":90}".to_owned())
@@ -389,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_json_document_that_is_not_an_object_falls_back_too() {
-        let plan = plan_client_settings(Some("[1,2,3]"), &patch_settings(None, true, 30));
+        let plan = plan_client_settings(Some("[1,2,3]"), &patch_settings(None, true, Some(30)));
         assert_eq!(
             plan,
             ClientSettingsPlan::Write("{\"DFIntTaskSchedulerTargetFps\":30}".to_owned())
@@ -402,7 +430,7 @@ mod tests {
         let custom = dir.join("my-settings.json");
         std::fs::write(&custom, "{}").expect("ghi file tuỳ biến");
 
-        let plan = plan_client_settings(None, &patch_settings(custom.to_str(), true, 240));
+        let plan = plan_client_settings(None, &patch_settings(custom.to_str(), true, Some(240)));
         assert_eq!(plan, ClientSettingsPlan::CopyCustom(custom.clone()));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -412,7 +440,7 @@ mod tests {
     fn a_custom_path_that_does_not_exist_falls_through_to_the_fps_unlock() {
         let plan = plan_client_settings(
             None,
-            &patch_settings(Some(r"C:\khong-ton-tai\settings.json"), true, 240),
+            &patch_settings(Some(r"C:\khong-ton-tai\settings.json"), true, Some(240)),
         );
         assert_eq!(
             plan,
@@ -423,7 +451,8 @@ mod tests {
     #[test]
     fn applying_writes_the_file_and_creates_the_subfolder() {
         let dir = make_version_folder("apply", true);
-        let plan = apply_client_settings(&dir, &patch_settings(None, true, 144)).expect("áp dụng");
+        let plan =
+            apply_client_settings(&dir, &patch_settings(None, true, Some(144))).expect("áp dụng");
 
         assert_eq!(
             plan,
@@ -443,7 +472,8 @@ mod tests {
     #[test]
     fn applying_leaves_the_disk_alone_when_the_plan_says_leave() {
         let dir = make_version_folder("leave", true);
-        let plan = apply_client_settings(&dir, &patch_settings(None, false, 120)).expect("áp dụng");
+        let plan =
+            apply_client_settings(&dir, &patch_settings(None, false, Some(120))).expect("áp dụng");
 
         assert_eq!(plan, ClientSettingsPlan::Leave);
         assert!(
@@ -457,7 +487,7 @@ mod tests {
     #[test]
     fn applying_refuses_a_folder_that_is_not_a_version_folder() {
         let dir = make_version_folder("refuse", false);
-        let error = apply_client_settings(&dir, &patch_settings(None, true, 240))
+        let error = apply_client_settings(&dir, &patch_settings(None, true, Some(240)))
             .expect_err("phải từ chối");
 
         assert!(matches!(error, PatchError::NotAVersionFolder(_)));
@@ -470,7 +500,8 @@ mod tests {
         let custom = dir.join("custom.json");
         std::fs::write(&custom, r#"{"Custom":true}"#).expect("ghi file tuỳ biến");
 
-        apply_client_settings(&dir, &patch_settings(custom.to_str(), true, 240)).expect("áp dụng");
+        apply_client_settings(&dir, &patch_settings(custom.to_str(), true, Some(240)))
+            .expect("áp dụng");
 
         let written = std::fs::read_to_string(client_app_settings_path(&dir)).expect("đọc lại");
         assert_eq!(written, r#"{"Custom":true}"#);
