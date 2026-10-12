@@ -1,7 +1,7 @@
 # Workspace root — Muster
 #
-# Tên dự án CHƯA CHỐT. Codename tạm nằm ở [workspace.metadata.project] bên dưới.
-# Đổi tên bằng một lệnh:  tools/rename.sh <TenMoi>
+# Tên dự án đã chốt: Muster (2026-10-12). Nguồn duy nhất của tên nằm ở
+# [workspace.metadata.project] bên dưới. Nếu cần đổi tên:  tools/rename.sh <TenMoi>
 # Xem ROADMAP.md mục 12.
 
 [workspace]

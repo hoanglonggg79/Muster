@@ -5,12 +5,14 @@
 
 Windows. Rust + Tauri 2 + React + TypeScript. Giấy phép **GPL-3.0**.
 
-> **Tên dự án chưa chốt.** Codename tạm là `Muster`. Đổi tên bằng một lệnh:
+> **Tên dự án đã chốt: `Muster`** (2026-10-12). Nếu sau này cần đổi tên, dùng một lệnh:
 > `tools/rename.sh <TenMoi>` — xem `ROADMAP.md` mục 12.
 
 ## Trạng thái
 
-**M0 đã xong hoàn toàn (0.1 → 0.8).** Việc tiếp theo là **M1** — xem `ROADMAP.md` mục 6.
+**M0 xong hoàn toàn (0.1 → 0.8).** **M1 xong phần lõi + GUI đầu tiên chạy được.**
+Việc tiếp theo: đóng M1 (auth retry/rate limit, presence, VIP server) rồi sang M2 — xem
+`ROADMAP.md` mục 6.
 
 | Bước | Việc | Trạng thái |
 | :--- | :--- | :--- |
@@ -75,14 +77,17 @@ cd crates/muster-app
 npm install
 npm run tauri dev              # chạy app desktop
 npm run typecheck
+npm run lint                   # ESLint
 npm run codegen                # sinh lại src/bindings.ts từ code Rust
 ```
 
 `cargo check` không tham số chỉ kiểm 3 crate nhẹ (xem `default-members` trong `Cargo.toml`).
 Crate Tauri kéo theo rất nhiều phụ thuộc nên chỉ build khi cần.
 
-⚠️ `cargo test --workspace` **phải loại trừ `muster-app`** — test binary của crate đó không nạp
-được trên Windows (rủi ro #17 trong `ROADMAP.md`). CI cũng làm vậy.
+`cargo test --workspace` chạy được cả `muster-app` — rủi ro #17 (test binary không nạp được) đã
+kiểm chứng lại là **không còn tái hiện**. Nếu gặp `Access is denied (os error 5)` trong
+`target/debug/build/...` thì đó là **rủi ro #16** (khoá file), chữa bằng `cargo clean -p muster-app`
+sau khi đóng mọi tiến trình `Muster.exe` / dev server.
 
 ## Giấy phép
 
