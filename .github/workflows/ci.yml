@@ -2,13 +2,13 @@
 #
 # Hai job tách rời vì chúng có hai cây phụ thuộc khác nhau và hỏng vì hai lý do khác nhau.
 #
-# Lưu ý quan trọng về `cargo test`: phải loại trừ `muster-app`. Test binary của crate đó không
-# nạp được trên Windows (rủi ro #17 trong ROADMAP.md), nên `cargo test --workspace` sẽ đổ dù code
-# đúng. Việc loại trừ này hợp lý về kiến trúc: nguyên tắc bất biến #3 nói `muster-app` chỉ chứa
-# command wrapper, không có logic gì để test.
+# `cargo test` chạy cả `muster-app`: rủi ro #17 (test binary của crate đó không nạp được trên
+# Windows) đã được kiểm chứng lại ngày 2026-10-11 là KHÔNG còn tái hiện, nên không cần loại trừ.
+# Nếu gặp "Access is denied (os error 5)" trong target/debug/build/... thì đó là rủi ro #16 (khoá
+# file); CARGO_INCREMENTAL=0 bên dưới đã giảm nguồn lock cho CI.
 #
-# Bù lại, job Rust có một bước kiểm tra bindings TypeScript còn khớp với code Rust hay không —
-# đúng loại lệch mà mục 6.0-UI muốn chặn.
+# Job Rust có một bước kiểm tra bindings TypeScript còn khớp với code Rust hay không — đúng loại
+# lệch mà mục 6.0-UI muốn chặn. Job Frontend chạy typecheck, lint (Biome) rồi build.
 
 name: CI
 
@@ -45,9 +45,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Loại trừ muster-app — xem ghi chú đầu file.
       - name: Test
-        run: cargo test --workspace --exclude muster-app
+        run: cargo test --workspace
 
       - name: Bindings TypeScript còn khớp với code Rust
         run: |
@@ -75,6 +74,9 @@ jobs:
 
       - name: Kiểm tra kiểu
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
 
       - name: Build
         run: npm run build
