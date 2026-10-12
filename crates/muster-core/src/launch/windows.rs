@@ -2,7 +2,7 @@ use core::ffi::c_void;
 use core::ptr;
 use std::time::Duration;
 
-use super::{ClientControl, LaunchError, SINGLETON_MUTEX_NAME};
+use super::{ClientControl, LaunchError, RunningClient, SINGLETON_MUTEX_NAME};
 
 type Hwnd = *mut c_void;
 
@@ -17,6 +17,24 @@ unsafe extern "system" {
     fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
     fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
     fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
+    fn ReadProcessMemory(
+        process: *mut c_void,
+        base_address: *const c_void,
+        buffer: *mut c_void,
+        size: usize,
+        number_of_bytes_read: *mut usize,
+    ) -> i32;
+}
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtQueryInformationProcess(
+        process: *mut c_void,
+        information_class: u32,
+        buffer: *mut c_void,
+        length: u32,
+        return_length: *mut u32,
+    ) -> i32;
 }
 
 #[link(name = "user32")]
@@ -54,6 +72,16 @@ struct ProcessEntry32W {
     pc_pri_class_base: i32,
     dw_flags: u32,
     sz_exe_file: [u16; 260],
+}
+
+#[cfg(target_pointer_width = "64")]
+#[repr(C)]
+struct ProcessBasicInformation {
+    reserved1: *mut c_void,
+    peb_base_address: *mut c_void,
+    reserved2: [*mut c_void; 2],
+    unique_process_id: *mut c_void,
+    reserved3: *mut c_void,
 }
 
 pub struct SingletonMutex {
@@ -230,6 +258,165 @@ pub fn find_running_roblox_pids() -> Vec<u32> {
     pids
 }
 
+#[cfg(target_pointer_width = "64")]
+pub fn read_command_line(process_id: u32) -> Option<String> {
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+
+    const PEB_PROCESS_PARAMETERS_OFFSET: usize = 0x20;
+    const PROCESS_PARAMETERS_COMMAND_LINE_OFFSET: usize = 0x70;
+    const UNICODE_STRING_BUFFER_OFFSET: usize = 0x08;
+    const MAX_COMMAND_LINE_BYTES: usize = 32_768;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
+        if handle.is_null() {
+            return None;
+        }
+
+        let result = read_command_line_from_handle(
+            handle,
+            PEB_PROCESS_PARAMETERS_OFFSET,
+            PROCESS_PARAMETERS_COMMAND_LINE_OFFSET,
+            UNICODE_STRING_BUFFER_OFFSET,
+            MAX_COMMAND_LINE_BYTES,
+        );
+
+        CloseHandle(handle);
+        result
+    }
+}
+
+#[cfg(not(target_pointer_width = "64"))]
+pub fn read_command_line(_process_id: u32) -> Option<String> {
+    None
+}
+
+#[cfg(target_pointer_width = "64")]
+unsafe fn read_command_line_from_handle(
+    handle: *mut c_void,
+    peb_process_parameters_offset: usize,
+    command_line_offset: usize,
+    buffer_offset: usize,
+    max_bytes: usize,
+) -> Option<String> {
+    unsafe {
+        let mut info = ProcessBasicInformation {
+            reserved1: ptr::null_mut(),
+            peb_base_address: ptr::null_mut(),
+            reserved2: [ptr::null_mut(), ptr::null_mut()],
+            unique_process_id: ptr::null_mut(),
+            reserved3: ptr::null_mut(),
+        };
+
+        let status = NtQueryInformationProcess(
+            handle,
+            0,
+            (&raw mut info).cast(),
+            size_of::<ProcessBasicInformation>() as u32,
+            ptr::null_mut(),
+        );
+        if status != 0 || info.peb_base_address.is_null() {
+            return None;
+        }
+
+        let parameters = read_pointer(
+            handle,
+            add(info.peb_base_address, peb_process_parameters_offset),
+        )?;
+        if parameters.is_null() {
+            return None;
+        }
+
+        let command_line = add(parameters, command_line_offset);
+        if command_line.is_null() {
+            return None;
+        }
+
+        let mut length_bytes = [0u8; 2];
+        let mut bytes_read = 0usize;
+        if ReadProcessMemory(
+            handle,
+            command_line.cast_const(),
+            length_bytes.as_mut_ptr().cast(),
+            2,
+            &raw mut bytes_read,
+        ) == 0
+        {
+            return None;
+        }
+
+        let length = usize::from(u16::from_le_bytes(length_bytes));
+        if length == 0 || length > max_bytes {
+            return None;
+        }
+
+        let buffer = read_pointer(handle, add(command_line, buffer_offset))?;
+        if buffer.is_null() {
+            return None;
+        }
+
+        let mut bytes = vec![0u8; length];
+        let mut read = 0usize;
+        if ReadProcessMemory(
+            handle,
+            buffer,
+            bytes.as_mut_ptr().cast(),
+            length,
+            &raw mut read,
+        ) == 0
+            || read != length
+        {
+            return None;
+        }
+
+        let wide: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+
+        Some(String::from_utf16_lossy(&wide))
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+unsafe fn read_pointer(handle: *mut c_void, address: *mut c_void) -> Option<*mut c_void> {
+    let mut buffer = [0u8; size_of::<*mut c_void>()];
+    let mut read = 0usize;
+
+    let ok = unsafe {
+        ReadProcessMemory(
+            handle,
+            address.cast_const(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &raw mut read,
+        )
+    };
+
+    if ok == 0 || read != buffer.len() {
+        return None;
+    }
+
+    Some(usize::from_le_bytes(buffer) as *mut c_void)
+}
+
+#[cfg(target_pointer_width = "64")]
+fn add(address: *mut c_void, offset: usize) -> *mut c_void {
+    (address as usize + offset) as *mut c_void
+}
+
+#[must_use]
+pub fn list_running_clients() -> Vec<RunningClient> {
+    find_running_roblox_pids()
+        .into_iter()
+        .map(|pid| RunningClient {
+            pid,
+            command_line: read_command_line(pid).unwrap_or_default(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +449,24 @@ mod tests {
         let text = format!("{mutex:?}");
         assert!(text.contains("ROBLOX_singletonMutex"), "text: {text}");
         assert!(!text.contains("0x"), "khong nen in dia chi tho: {text}");
+    }
+
+    #[test]
+    fn the_command_line_of_our_own_process_can_be_read() {
+        let command_line = read_command_line(std::process::id()).expect("doc duoc cmdline");
+
+        assert!(
+            !command_line.is_empty(),
+            "cmdline khong duoc rong: {command_line}"
+        );
+        assert!(
+            command_line.contains("muster"),
+            "cmdline cua chinh test binary nay phai chua 'muster': {command_line}"
+        );
+    }
+
+    #[test]
+    fn a_process_that_is_gone_reads_as_nothing() {
+        assert_eq!(read_command_line(u32::MAX), None);
     }
 }
