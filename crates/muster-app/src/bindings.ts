@@ -12,9 +12,11 @@ export const commands = {
 	accountRemove: (userId: number | null) => typedError<null, string>(__TAURI_INVOKE("account_remove", { userId })),
 	accountRefresh: (userId: number | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_refresh", { userId })),
 	accountLaunch: (userId: number | null, placeId: number | null, jobId: string | null) => typedError<string, string>(__TAURI_INVOKE("account_launch", { userId, placeId, jobId })),
-	patchApplyFps: (unlockFps: boolean, maxFps: number) => typedError<string, string>(__TAURI_INVOKE("patch_apply_fps", { unlockFps, maxFps })),
+	patchApplyFps: (unlockFps: boolean, maxFps: number | null) => typedError<string, string>(__TAURI_INVOKE("patch_apply_fps", { unlockFps, maxFps })),
 	multiRobloxToggle: (enabled: boolean) => typedError<boolean, string>(__TAURI_INVOKE("multi_roblox_toggle", { enabled })),
-	vaultImportRam: (dir: string) => typedError<number, string>(__TAURI_INVOKE("vault_import_ram", { dir })),
+	vaultImportRam: (dir: string, password: string | null) => typedError<number, string>(__TAURI_INVOKE("vault_import_ram", { dir, password })),
+	presenceBatch: (userIds: (number | null)[]) => typedError<PresenceInfo[], string>(__TAURI_INVOKE("presence_batch", { userIds })),
+	accountUpdate: (userId: number | null, alias: string, group: string | null, description: string, savedPlaceId: string | null, savedJobId: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_update", { userId, alias, group, description, savedPlaceId, savedJobId })),
 };
 
 /* Types */
@@ -53,6 +55,15 @@ export type Account_Serialize = {
 export type Branch = "PasswordLocked" | "Dpapi" | "PlainJson";
 
 export type Format = "PasswordLocked" | "Dpapi" | "PlainJson";
+
+export type PresenceInfo = {
+	user_id: number | null,
+	presence_type: PresenceType,
+	place_id: number | null,
+	last_online: string | null,
+};
+
+export type PresenceType = number;
 
 export type VaultInspection = {
 	path: string,

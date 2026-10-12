@@ -1,25 +1,40 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use muster_core::datetime::now_json_net;
+use muster_core::datetime::{now_local_json_net, now_unix_millis};
 use muster_core::import;
-use muster_core::launch::windows::{SingletonMutex, launch_roblox_url};
-use muster_core::launch::{LaunchTarget, build_launch_url, generate_browser_tracker_id};
+use muster_core::launch::windows::{
+    SingletonMutex, SystemClientControl, launch_roblox_url, list_running_clients,
+};
+use muster_core::launch::{
+    LaunchTarget, build_launch_url, close_previous_instances, generate_browser_tracker_id,
+};
 use muster_core::models::Account;
-use muster_core::patch::{PatchSettings, apply_client_settings, find_version_folder};
+use muster_core::patch::{
+    DEFAULT_UNLOCK_FPS, PatchSettings, apply_client_settings, find_version_folder,
+};
 use muster_core::roblox::account::AccountStore;
 use muster_core::roblox::api::{
     fetch_authenticated_user, fetch_user_avatar_headshot, fetch_user_robux,
 };
 use muster_core::roblox::auth::AuthClient;
+use muster_core::roblox::limiter::{RateLimiter, RetryTransport};
+use muster_core::roblox::presence::{PresenceType, fetch_presences};
 use muster_core::roblox::reqwest_transport::ReqwestTransport;
+use muster_core::roblox::vip::{extract_link_code, fetch_access_code, strip_vip_prefix};
+use muster_core::settings::Settings;
 use muster_core::vault::{self, Branch, Format};
 use serde::Serialize;
 use specta::Type;
 use specta_typescript::Typescript;
 use tauri::State;
 use tauri_specta::{Builder, collect_commands};
+
+pub const SAVED_PLACE_ID_FIELD: &str = "SavedPlaceId";
+pub const SAVED_JOB_ID_FIELD: &str = "SavedJobId";
+pub const HTTP_MIN_INTERVAL_MS: u64 = 200;
 
 #[derive(Debug, Serialize, Type)]
 pub struct VaultInspection {
@@ -36,16 +51,68 @@ pub struct VaultOpenSummary {
     pub usernames: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Type)]
+pub struct PresenceInfo {
+    pub user_id: f64,
+
+    pub presence_type: PresenceType,
+
+    #[specta(type = Option<f64>)]
+    pub place_id: Option<i64>,
+
+    pub last_online: Option<String>,
+}
+
 pub struct AppState {
     pub store: Mutex<AccountStore>,
     pub mutex_guard: Mutex<Option<SingletonMutex>>,
     pub data_file: PathBuf,
+    pub settings: Settings,
+    pub limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
     fn save_accounts(&self) -> Result<(), String> {
         let store = self.store.lock().map_err(|e| e.to_string())?;
         vault::write_accounts(&self.data_file, store.accounts()).map_err(|e| e.to_string())
+    }
+}
+
+fn http_transport(state: &AppState) -> Result<RetryTransport<ReqwestTransport>, String> {
+    ReqwestTransport::new()
+        .map(|transport| RetryTransport::new(transport).with_limiter(Arc::clone(&state.limiter)))
+        .map_err(|error| error.to_string())
+}
+
+fn resolve_launch_target<T: muster_core::roblox::http::Transport>(
+    transport: &T,
+    place_id: i64,
+    job_id: Option<&str>,
+    csrf: &str,
+    cookie: &str,
+) -> Result<LaunchTarget, String> {
+    let Some(job) = job_id.map(strip_vip_prefix).filter(|job| !job.is_empty()) else {
+        return Ok(LaunchTarget::Game {
+            place_id,
+            job_id: None,
+        });
+    };
+
+    match extract_link_code(job) {
+        Some(link_code) => {
+            let access_code = fetch_access_code(transport, place_id, link_code, csrf, cookie)
+                .map_err(|error| error.to_string())?;
+
+            Ok(LaunchTarget::PrivateServer {
+                place_id,
+                access_code,
+                link_code: link_code.to_owned(),
+            })
+        }
+        None => Ok(LaunchTarget::Game {
+            place_id,
+            job_id: Some(job.to_owned()),
+        }),
     }
 }
 
@@ -92,7 +159,7 @@ fn account_add_cookie(
     alias: Option<String>,
     state: State<AppState>,
 ) -> Result<Account, String> {
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+    let transport = http_transport(&state)?;
     let user_info = fetch_authenticated_user(&transport, &cookie).map_err(|e| e.to_string())?;
 
     let robux = fetch_user_robux(&transport, user_info.id, &cookie).unwrap_or(0);
@@ -110,25 +177,27 @@ fn account_add_cookie(
         valid: true,
         security_token: Some(cookie),
         username: Some(user_info.name),
-        last_use: now_json_net(),
+        last_use: now_local_json_net(),
         alias: alias.unwrap_or(user_info.display_name),
         description: String::new(),
         password: String::new(),
         group: None,
         user_id: user_info.id,
         fields,
-        last_attempted_refresh: now_json_net(),
+        last_attempted_refresh: now_local_json_net(),
         browser_tracker_id: Some(tracker_id),
         extra: BTreeMap::new(),
     };
 
-    {
+    let index = {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
-        let _ = store.add(account.clone()).map_err(|e| e.to_string())?;
-    }
+        let (_, index) = store.add(account).map_err(|e| e.to_string())?;
+        index
+    };
     state.save_accounts()?;
 
-    Ok(account)
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    store.get(index).cloned().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -139,8 +208,8 @@ fn account_add_credentials(
     alias: Option<String>,
     state: State<AppState>,
 ) -> Result<Account, String> {
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
-    let auth = AuthClient::new(transport);
+    let transport = http_transport(&state)?;
+    let auth = AuthClient::new(&transport);
 
     let cookie = auth
         .login(&username, &password)
@@ -173,7 +242,7 @@ fn account_refresh(user_id: f64, state: State<AppState>) -> Result<Account, Stri
             .to_owned()
     };
 
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+    let transport = http_transport(&state)?;
     let user_info = fetch_authenticated_user(&transport, &cookie).map_err(|e| e.to_string())?;
     let robux = fetch_user_robux(&transport, uid, &cookie).unwrap_or(0);
     let avatar = fetch_user_avatar_headshot(&transport, uid).unwrap_or(None);
@@ -190,7 +259,7 @@ fn account_refresh(user_id: f64, state: State<AppState>) -> Result<Account, Stri
         if let Some(url) = avatar {
             acc.set_field("AvatarUrl", url);
         }
-        acc.last_attempted_refresh = now_json_net();
+        acc.last_attempted_refresh = now_local_json_net();
         acc.clone()
     };
 
@@ -209,33 +278,55 @@ fn account_launch(
     let uid = user_id as i64;
     let pid = place_id as i64;
 
-    let (cookie, tracker_id) = {
-        let store = state.store.lock().map_err(|e| e.to_string())?;
+    let (cookie, tracker, tracker_generated) = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
         let idx = store
             .find_by_user_id(uid)
             .ok_or_else(|| "không tìm thấy tài khoản".to_string())?;
-        let acc = store.get(idx).map_err(|e| e.to_string())?;
-        let c = acc
+        let acc = store.get_mut(idx).map_err(|e| e.to_string())?;
+
+        let cookie = acc
             .cookie()
             .ok_or_else(|| "tài khoản không có cookie".to_string())?
             .to_owned();
-        let t = acc
+
+        let generated = match acc.browser_tracker_id.as_deref() {
+            Some(tracker) if !tracker.is_empty() => false,
+            _ => {
+                let tracker = generate_browser_tracker_id().map_err(|e| e.to_string())?;
+                acc.browser_tracker_id = Some(tracker);
+                true
+            }
+        };
+
+        let tracker = acc
             .browser_tracker_id
-            .as_deref()
-            .unwrap_or("100000000001")
-            .to_owned();
-        (c, t)
+            .clone()
+            .ok_or_else(|| "tài khoản không có BrowserTrackerID".to_string())?;
+
+        (cookie, tracker, generated)
     };
 
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
-    let auth = AuthClient::new(transport);
-    let ticket = auth.auth_ticket(&cookie).map_err(|e| e.to_string())?;
+    if tracker_generated {
+        state.save_accounts()?;
+    }
 
-    let target = LaunchTarget::Game {
-        place_id: pid,
-        job_id,
-    };
-    let launch_url = build_launch_url(&ticket, &target, &tracker_id, 0, false);
+    let transport = http_transport(&state)?;
+    let auth = AuthClient::new(&transport);
+    let csrf = auth.csrf_token(&cookie).map_err(|e| e.to_string())?;
+    let ticket = auth
+        .auth_ticket_with_csrf(&cookie, &csrf)
+        .map_err(|e| e.to_string())?;
+
+    if state.settings.general.auto_close_last_process {
+        let clients = list_running_clients();
+        let mut control = SystemClientControl;
+        close_previous_instances(&mut control, &clients, &tracker);
+    }
+
+    let target = resolve_launch_target(&transport, pid, job_id.as_deref(), &csrf, &cookie)?;
+
+    let launch_url = build_launch_url(ticket.as_str(), &target, &tracker, now_unix_millis(), false);
 
     launch_roblox_url(&launch_url).map_err(|e| e.to_string())?;
 
@@ -244,16 +335,17 @@ fn account_launch(
 
 #[tauri::command]
 #[specta::specta]
-fn patch_apply_fps(unlock_fps: bool, max_fps: u32) -> Result<String, String> {
+fn patch_apply_fps(unlock_fps: bool, max_fps: Option<u32>) -> Result<String, String> {
     let folder = find_version_folder().map_err(|e| e.to_string())?;
     let settings = PatchSettings {
         custom_client_settings: None,
         unlock_fps,
-        max_fps_value: if max_fps == 0 { 240 } else { max_fps },
+        max_fps_value: max_fps,
     };
     apply_client_settings(&folder, &settings).map_err(|e| e.to_string())?;
+    let effective = max_fps.unwrap_or(DEFAULT_UNLOCK_FPS);
     Ok(format!(
-        "Đã áp dụng cấu hình FPS ({max_fps} FPS) tại {}",
+        "Đã áp dụng cấu hình FPS ({effective} FPS) tại {}",
         folder.display()
     ))
 }
@@ -276,24 +368,97 @@ fn multi_roblox_toggle(enabled: bool, state: State<AppState>) -> Result<bool, St
 
 #[tauri::command]
 #[specta::specta]
-fn vault_import_ram(dir: String, state: State<AppState>) -> Result<u32, String> {
-    let path = Path::new(&dir).join("AccountData.json");
+fn vault_import_ram(
+    dir: String,
+    password: Option<String>,
+    state: State<AppState>,
+) -> Result<u32, String> {
+    let path = Path::new(&dir).join(import::ACCOUNT_FILE);
     if !path.is_file() {
         return Err("Không tìm thấy file AccountData.json trong thư mục chỉ định".to_string());
     }
 
-    let (accounts, _) = vault::read_accounts_from_path(&path, None).map_err(|e| e.to_string())?;
+    let (accounts, _) =
+        vault::read_accounts_from_path(&path, password.as_deref()).map_err(|e| e.to_string())?;
     let count = accounts.len() as u32;
 
     {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
         for acc in accounts {
-            let _ = store.add(acc);
+            store.import_account(acc).map_err(|e| e.to_string())?;
         }
     }
     state.save_accounts()?;
 
     Ok(count)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn presence_batch(user_ids: Vec<f64>) -> Result<Vec<PresenceInfo>, String> {
+    let ids: Vec<i64> = user_ids.into_iter().map(|id| id as i64).collect();
+
+    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+    let presences = fetch_presences(&transport, &ids).map_err(|e| e.to_string())?;
+
+    Ok(presences
+        .into_iter()
+        .map(|presence| PresenceInfo {
+            user_id: presence.user_id as f64,
+            presence_type: presence.user_presence_type,
+            place_id: presence.place_id,
+            last_online: presence.last_online,
+        })
+        .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn account_update(
+    user_id: f64,
+    alias: String,
+    group: Option<String>,
+    description: String,
+    saved_place_id: Option<String>,
+    saved_job_id: Option<String>,
+    state: State<AppState>,
+) -> Result<Account, String> {
+    let uid = user_id as i64;
+
+    let updated = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        let idx = store
+            .find_by_user_id(uid)
+            .ok_or_else(|| "không tìm thấy tài khoản".to_string())?;
+        let account = store.get_mut(idx).map_err(|e| e.to_string())?;
+
+        account.alias = alias;
+        account.description = description;
+        account.group = group.filter(|value| !value.trim().is_empty());
+
+        match saved_place_id {
+            Some(value) if !value.trim().is_empty() => {
+                account.set_field(SAVED_PLACE_ID_FIELD, value.trim().to_owned());
+            }
+            _ => {
+                account.remove_field(SAVED_PLACE_ID_FIELD);
+            }
+        }
+
+        match saved_job_id {
+            Some(value) if !value.trim().is_empty() => {
+                account.set_field(SAVED_JOB_ID_FIELD, value.trim().to_owned());
+            }
+            _ => {
+                account.remove_field(SAVED_JOB_ID_FIELD);
+            }
+        }
+
+        account.clone()
+    };
+
+    state.save_accounts()?;
+    Ok(updated)
 }
 
 #[must_use]
@@ -315,7 +480,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             account_launch,
             patch_apply_fps,
             multi_roblox_toggle,
-            vault_import_ram
+            vault_import_ram,
+            presence_batch,
+            account_update,
         ])
         .typ::<Account>()
 }
@@ -340,6 +507,9 @@ pub fn run() {
 
     let data_file = import::portable_account_file();
 
+    let settings_file = import::portable_data_dir().join("settings.toml");
+    let settings = Settings::load(&settings_file).unwrap_or_default();
+
     let initial_accounts = if data_file.is_file() {
         vault::read_accounts_from_path(&data_file, None)
             .map(|(accs, _)| accs)
@@ -352,6 +522,10 @@ pub fn run() {
         store: Mutex::new(AccountStore::from_accounts(initial_accounts)),
         mutex_guard: Mutex::new(None),
         data_file,
+        settings,
+        limiter: Arc::new(RateLimiter::new(Duration::from_millis(
+            HTTP_MIN_INTERVAL_MS,
+        ))),
     };
 
     tauri::Builder::default()
