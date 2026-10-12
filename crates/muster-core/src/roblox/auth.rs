@@ -81,9 +81,17 @@ impl<T: Transport> AuthClient<T> {
 
     pub fn auth_ticket(&self, cookie: &str) -> Result<Zeroizing<String>, AuthError> {
         let csrf = self.csrf_token(cookie)?;
+        self.auth_ticket_with_csrf(cookie, &csrf)
+    }
+
+    pub fn auth_ticket_with_csrf(
+        &self,
+        cookie: &str,
+        csrf: &str,
+    ) -> Result<Zeroizing<String>, AuthError> {
         let response = self
             .transport
-            .execute(&self.ticket_request(cookie, Some(&csrf)))?;
+            .execute(&self.ticket_request(cookie, Some(csrf)))?;
 
         response
             .header("rbx-authentication-ticket")
