@@ -220,7 +220,7 @@ fi
 cat <<EOF
 
 Con phai lam tay:
-  - ROADMAP.md muc 12 va README.md: cau "codename tam la <ten cu>" gio khong con dung nua.
+  - ROADMAP.md muc 10.3 va README.md: cau "codename tam la <ten cu>" gio khong con dung nua.
   - Doi ten thu muc goc cua repo neu muon (script co tinh KHONG lam viec nay).
   - .workbuddy-ai/ khong bi sua — ghi chu cu van dung ten cu.
   - Kiem tra 'git diff' de chac chan RAM_Source/ khong bi cham vao.

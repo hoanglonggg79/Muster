@@ -15,6 +15,7 @@ Ket qua: crates/muster-app/src-tauri/icons/
 from __future__ import annotations
 
 import os
+import shutil
 import struct
 import sys
 import zlib
@@ -137,9 +138,58 @@ def ico_bytes(sizes: list[int]) -> bytes:
 
 
 
+def export_from_raster(source: str, out_dir: str) -> bool:
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+
+    img = Image.open(source).convert("RGBA")
+    pngs = {
+        "32x32.png": 32,
+        "128x128.png": 128,
+        "128x128@2x.png": 256,
+        "icon.png": 512,
+        "Square150x150Logo.png": 150,
+        "Square44x44Logo.png": 44,
+        "StoreLogo.png": 50,
+    }
+    for name, size in pngs.items():
+        path = os.path.join(out_dir, name)
+        resized = img.resize((size, size), Image.Resampling.LANCZOS)
+        resized.save(path, format="PNG")
+        print(f"  {name:26} {size}x{size} (from {os.path.basename(source)})")
+    return True
+
+
 def main() -> int:
     out_dir = find_icons_dir()
     os.makedirs(out_dir, exist_ok=True)
+
+    root_ico = os.path.join(ROOT, "icon.ico")
+    root_jpg = os.path.join(ROOT, "icon.jpg")
+    root_png = os.path.join(ROOT, "icon.png")
+    raster = next(
+        (path for path in (root_jpg, root_png, root_ico) if os.path.isfile(path)),
+        None,
+    )
+
+    if raster and export_from_raster(raster, out_dir):
+        if os.path.isfile(root_ico):
+            shutil.copy2(root_ico, os.path.join(out_dir, "icon.ico"))
+            print(f"  {'icon.ico':26} copied from repo root")
+        else:
+            ico_sizes = [16, 32, 48, 64, 128, 256]
+            path = os.path.join(out_dir, "icon.ico")
+            with open(path, "wb") as f:
+                f.write(ico_bytes(ico_sizes))
+            print(f"  {'icon.ico':26} {', '.join(str(s) for s in ico_sizes)}")
+        print(f"\n-> {out_dir}")
+        return 0
+
+    if os.path.isfile(root_ico):
+        shutil.copy2(root_ico, os.path.join(out_dir, "icon.ico"))
+        print(f"  {'icon.ico':26} copied from repo root (install Pillow for PNG sizes)")
 
     pngs = {
         "32x32.png": 32,
@@ -156,11 +206,12 @@ def main() -> int:
             f.write(png_bytes(render(size)))
         print(f"  {name:26} {size}x{size}")
 
-    ico_sizes = [16, 32, 48, 64, 128, 256]
-    path = os.path.join(out_dir, "icon.ico")
-    with open(path, "wb") as f:
-        f.write(ico_bytes(ico_sizes))
-    print(f"  {'icon.ico':26} {', '.join(str(s) for s in ico_sizes)}")
+    if not os.path.isfile(os.path.join(out_dir, "icon.ico")):
+        ico_sizes = [16, 32, 48, 64, 128, 256]
+        path = os.path.join(out_dir, "icon.ico")
+        with open(path, "wb") as f:
+            f.write(ico_bytes(ico_sizes))
+        print(f"  {'icon.ico':26} {', '.join(str(s) for s in ico_sizes)}")
 
     print(f"\n-> {out_dir}")
     return 0

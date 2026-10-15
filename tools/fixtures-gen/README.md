@@ -1,6 +1,6 @@
 # tools/fixtures-gen
 
-Sinh test vector cho `core::vault` — bước **0.1** trong ROADMAP mục 6.0.
+Sinh test vector cho `core::vault` — bước **0.1** của M0 (xem `ROADMAP.md` §9.1).
 
 ## Chạy
 

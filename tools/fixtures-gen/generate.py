@@ -1,5 +1,5 @@
 """
-Sinh test vector cho core::vault  (ROADMAP buoc 0.1).
+Sinh test vector cho core::vault  (ROADMAP.md muc 9.1, buoc 0.1 cua M0).
 
 Muc tieu: tao ra 4 file mau dai dien cho 4 nhanh dinh dang ma Roblox Account Manager
 (RAM) co the ghi ra, de `core::vault` co hop dong bat bien de kiem thu.
@@ -14,7 +14,7 @@ va doi chieu voi native libsodium 1.0.11:
     Algorithm = Argon2i (v1.3), t_cost = 6, m_cost = 131072 KiB (128 MiB), p_cost = 1, out = 32
     dau vao Argon2 = SHA-512(password)  (64 byte), KHONG phai password tho
 
-Xem ROADMAP.md muc 4.1.
+Xem ROADMAP.md muc 2.1 (4 nhanh dinh dang) va muc 2.2 (tham so Argon2).
 
 Chay:  python tools/fixtures-gen/generate.py
 Ket qua ghi vao: crates/muster-core/tests/fixtures/

@@ -2,13 +2,14 @@
 #
 # Hai job tách rời vì chúng có hai cây phụ thuộc khác nhau và hỏng vì hai lý do khác nhau.
 #
-# `cargo test` chạy cả `muster-app`: rủi ro #17 (test binary của crate đó không nạp được trên
-# Windows) đã được kiểm chứng lại ngày 2026-10-11 là KHÔNG còn tái hiện, nên không cần loại trừ.
-# Nếu gặp "Access is denied (os error 5)" trong target/debug/build/... thì đó là rủi ro #16 (khoá
-# file); CARGO_INCREMENTAL=0 bên dưới đã giảm nguồn lock cho CI.
+# `cargo test` chạy cả `muster-app`: lỗi nạp test binary của crate đó trên Windows (rủi ro #17) đã
+# được kiểm chứng lại ngày 2026-10-11 là KHÔNG còn tái hiện, nên không cần loại trừ.
+# Nếu gặp "Access is denied (os error 5)" trong target/debug/build/... thì đó là lỗi khoá/tranh chấp
+# file (rủi ro #16) — không phải lỗi code; CARGO_INCREMENTAL=0 bên dưới đã giảm nguồn lock cho CI.
+# Cả hai mã #16/#17 nay nằm ở ROADMAP.md §6.1.
 #
 # Job Rust có một bước kiểm tra bindings TypeScript còn khớp với code Rust hay không — đúng loại
-# lệch mà mục 6.0-UI muốn chặn. Job Frontend chạy typecheck, lint (Biome) rồi build.
+# lệch mà ROADMAP.md §2.9 muốn chặn. Job Frontend chạy typecheck, lint (Biome) rồi build.
 
 name: CI
 
