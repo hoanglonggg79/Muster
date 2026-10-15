@@ -1,6 +1,7 @@
 pub mod cdp;
 pub mod detect;
 pub mod launch;
+pub mod login;
 pub mod ws;
 
 #[cfg(feature = "http-reqwest")]

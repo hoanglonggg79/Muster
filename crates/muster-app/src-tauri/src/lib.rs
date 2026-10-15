@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use muster_core::browser::{cdp, detect, download, launch, ws};
+use muster_core::browser::{detect, download, login};
 use muster_core::datetime::{now_local_json_net, now_unix_millis};
 use muster_core::import;
 use muster_core::launch::windows::{
@@ -831,12 +831,6 @@ pub const BROWSER_PROGRESS_EVENT: &str = "browser-download";
 pub const BROWSER_DEVTOOLS_TIMEOUT_SECONDS: u64 = 30;
 pub const BROWSER_LOGIN_TIMEOUT_SECONDS: u64 = 600;
 pub const BROWSER_FORM_TIMEOUT_SECONDS: u64 = 60;
-pub const BROWSER_ENABLE_NETWORK_REQUEST_ID: u64 = 1;
-pub const BROWSER_USER_AGENT_REQUEST_ID: u64 = 2;
-pub const BROWSER_NAVIGATE_REQUEST_ID: u64 = 3;
-pub const BROWSER_FILL_FORM_REQUEST_ID: u64 = 4;
-pub const BROWSER_COOKIE_REQUEST_ID: u64 = 10;
-pub const BROWSER_FORM_POLL_INTERVAL_MS: u64 = 300;
 
 fn favorites_path(state: &AppState) -> PathBuf {
     state.data_dir.join(games::FAVORITES_FILE)
@@ -1113,6 +1107,8 @@ fn download_chromium_blocking(app: &AppHandle) -> Result<String, String> {
 
     let version_dir = detect::chrome_for_testing_root(&data_dir).join(&release.version);
     if detect::chrome_for_testing_binary(&version_dir).is_file() {
+        emit_browser_progress(app, "granting", 1.0, 1.0);
+        download::grant_app_container_access(&version_dir).map_err(|e| e.to_string())?;
         emit_browser_progress(app, "ready", 1.0, 1.0);
         return Ok(version_dir.to_string_lossy().into_owned());
     }
@@ -1153,6 +1149,9 @@ fn download_chromium_blocking(app: &AppHandle) -> Result<String, String> {
     let binary = download::extract_chrome(&archive, &version_dir).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&archive);
 
+    emit_browser_progress(app, "granting", 1.0, 1.0);
+    download::grant_app_container_access(&version_dir).map_err(|e| e.to_string())?;
+
     emit_browser_progress(app, "ready", 1.0, 1.0);
     Ok(binary.to_string_lossy().into_owned())
 }
@@ -1165,120 +1164,15 @@ async fn browser_download_chromium(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
-fn evaluate_value(socket: &mut ws::WebSocket, id: u64) -> Result<Option<String>, String> {
-    loop {
-        let message = match socket.recv_text() {
-            Ok(message) => message,
-            Err(ws::WsError::Io(error))
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => return Err(error.to_string()),
-        };
-        let Ok(reply) = serde_json::from_str::<serde_json::Value>(&message) else {
-            continue;
-        };
-        if reply.get("id").and_then(serde_json::Value::as_u64) != Some(id) {
-            continue;
-        }
+fn emit_login_phase(app: &AppHandle, phase: &login::LoginPhase) {
+    let label = match phase {
+        login::LoginPhase::Launching => "launching",
+        login::LoginPhase::WaitingLogin => "waiting-login",
+        login::LoginPhase::FillingForm => "filling-form",
+        login::LoginPhase::ManualLoginRequired(_) => "manual-login",
+    };
 
-        return Ok(reply
-            .pointer("/result/result/value")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned));
-    }
-}
-
-fn fill_login_form(
-    socket: &mut ws::WebSocket,
-    username: &str,
-    password: &str,
-    timeout: Duration,
-) -> Result<bool, String> {
-    let expression = format!(
-        "(() => {{ const u = document.querySelector('#login-username'); \
-         const p = document.querySelector('#login-password'); \
-         if (!u || !p) return 'waiting'; \
-         u.value = {user}; u.dispatchEvent(new Event('input', {{ bubbles: true }})); \
-         p.value = {pass}; p.dispatchEvent(new Event('input', {{ bubbles: true }})); \
-         const b = document.querySelector('#login-button'); if (b) b.click(); \
-         return 'ok'; }})()",
-        user = serde_json::Value::String(username.to_owned()),
-        pass = serde_json::Value::String(password.to_owned()),
-    );
-
-    let deadline = std::time::Instant::now() + timeout;
-    let mut id = BROWSER_FILL_FORM_REQUEST_ID;
-
-    while std::time::Instant::now() < deadline {
-        let request = serde_json::json!({
-            "id": id,
-            "method": "Runtime.evaluate",
-            "params": { "expression": expression, "returnByValue": true }
-        });
-
-        socket
-            .send_text(&request.to_string())
-            .map_err(|e| e.to_string())?;
-
-        if evaluate_value(socket, id)?.as_deref() == Some("ok") {
-            return Ok(true);
-        }
-
-        id += 1;
-        std::thread::sleep(Duration::from_millis(BROWSER_FORM_POLL_INTERVAL_MS));
-    }
-
-    Ok(false)
-}
-
-fn wait_for_security_cookie(
-    socket: &mut ws::WebSocket,
-    timeout: Duration,
-) -> Result<String, String> {
-    let deadline = std::time::Instant::now() + timeout;
-    let mut id = BROWSER_COOKIE_REQUEST_ID;
-
-    while std::time::Instant::now() < deadline {
-        socket
-            .send_text(&cdp::get_all_cookies_request(id))
-            .map_err(|e| e.to_string())?;
-
-        while std::time::Instant::now() < deadline {
-            let message = match socket.recv_text() {
-                Ok(message) => message,
-                Err(ws::WsError::Io(error))
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) =>
-                {
-                    break;
-                }
-                Err(error) => return Err(error.to_string()),
-            };
-            let Ok(reply) = serde_json::from_str::<serde_json::Value>(&message) else {
-                continue;
-            };
-            if reply.get("id").and_then(serde_json::Value::as_u64) != Some(id) {
-                continue;
-            }
-            let cookies = cdp::parse_cookies(&message, id)?;
-            if let Some(cookie) = cdp::find_security_cookie(&cookies) {
-                return Ok(cookie);
-            }
-            break;
-        }
-
-        id += 1;
-        std::thread::sleep(Duration::from_millis(700));
-    }
-
-    Err("Hết thời gian chờ đăng nhập".to_owned())
+    emit_browser_progress(app, label, 0.0, 0.0);
 }
 
 fn run_browser_login(
@@ -1287,99 +1181,27 @@ fn run_browser_login(
 ) -> Result<String, String> {
     let data_dir = import::ensure_app_data_dir();
 
-    let executable = detect::installed_chrome_for_testing(&data_dir).ok_or_else(|| {
-        "Muster chỉ dùng Chromium riêng của nó (Chrome for Testing), không dùng Chrome/Edge trên máy. \
-         Hãy bấm \"Tải Chromium về\" trước."
-            .to_owned()
-    })?;
+    let executable = detect::installed_chrome_for_testing(&data_dir)
+        .ok_or_else(|| login::NO_BROWSER_MESSAGE.to_owned())?;
 
-    let user_agent = launch::chrome_user_agent(detect::installed_version(&data_dir).as_deref());
-
-    let mut session = [0u8; 16];
-    getrandom::getrandom(&mut session).map_err(|e| e.to_string())?;
-    let session_name: String = session.iter().map(|byte| format!("{byte:02x}")).collect();
-    let profile = launch::profile_dir(&data_dir, &session_name);
-    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
-
-    let args = launch::launch_args(&profile);
-
-    emit_browser_progress(app, "launching", 0.0, 0.0);
-    let mut child = match launch::spawn(&executable, &args) {
-        Ok(child) => child,
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&profile);
-            return Err(error.to_string());
-        }
+    let request = login::LoginRequest {
+        executable: &executable,
+        data_dir: &data_dir,
+        credentials: credentials
+            .as_ref()
+            .map(|(username, password)| (username.as_str(), password.as_str())),
     };
 
-    let result = (|| {
-        let (port, path) = launch::wait_for_devtools_endpoint(
-            &profile,
-            launch::DEVTOOLS_HOST,
-            Duration::from_secs(BROWSER_DEVTOOLS_TIMEOUT_SECONDS),
-        )
-        .map_err(|e| e.to_string())?;
+    let timings = login::LoginTimings {
+        devtools: Duration::from_secs(BROWSER_DEVTOOLS_TIMEOUT_SECONDS),
+        form: Duration::from_secs(BROWSER_FORM_TIMEOUT_SECONDS),
+        login: Duration::from_secs(BROWSER_LOGIN_TIMEOUT_SECONDS),
+    };
 
-        let mut socket = ws::WebSocket::connect(
-            launch::DEVTOOLS_HOST,
-            port,
-            &path,
-            Duration::from_secs(BROWSER_DEVTOOLS_TIMEOUT_SECONDS),
-        )
-        .map_err(|e| e.to_string())?;
-
-        socket
-            .send_text(&cdp::enable_network_request(
-                BROWSER_ENABLE_NETWORK_REQUEST_ID,
-            ))
-            .map_err(|e| e.to_string())?;
-
-        if let Some(user_agent) = &user_agent {
-            socket
-                .send_text(&cdp::set_user_agent_override_request(
-                    BROWSER_USER_AGENT_REQUEST_ID,
-                    user_agent,
-                ))
-                .map_err(|e| e.to_string())?;
-        }
-
-        socket
-            .send_text(&cdp::navigate_request(
-                BROWSER_NAVIGATE_REQUEST_ID,
-                launch::ROBLOX_LOGIN_URL,
-                Some(launch::LOGIN_REFERRER),
-            ))
-            .map_err(|e| e.to_string())?;
-
-        emit_browser_progress(app, "waiting-login", 0.0, 0.0);
-
-        if let Some((username, password)) = credentials {
-            let _ = fill_login_form(
-                &mut socket,
-                &username,
-                &password,
-                Duration::from_secs(BROWSER_FORM_TIMEOUT_SECONDS),
-            );
-        }
-
-        socket
-            .set_read_timeout(Duration::from_secs(2))
-            .map_err(|e| e.to_string())?;
-
-        let cookie = wait_for_security_cookie(
-            &mut socket,
-            Duration::from_secs(BROWSER_LOGIN_TIMEOUT_SECONDS),
-        )?;
-
-        socket.close();
-        Ok(cookie)
-    })();
-
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = std::fs::remove_dir_all(&profile);
-
-    result
+    login::run_login(&request, &timings, &mut |phase| {
+        emit_login_phase(app, &phase)
+    })
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

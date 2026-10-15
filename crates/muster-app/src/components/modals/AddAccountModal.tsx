@@ -30,12 +30,18 @@ function phaseLabel(phase: string): string {
       return "Đang tải Chromium, chờ xíu...";
     case "extracting":
       return "Đang giải nén Chromium...";
+    case "granting":
+      return "Đang cấp quyền sandbox cho Chromium...";
     case "ready":
       return "Chromium đã sẵn sàng!";
     case "launching":
       return "Đang mở trình duyệt...";
+    case "filling-form":
+      return "Đang tự điền tài khoản...";
     case "waiting-login":
       return "Đang chờ bạn đăng nhập trong cửa sổ trình duyệt...";
+    case "manual-login":
+      return "Không tự điền được — hãy đăng nhập thủ công trong cửa sổ trình duyệt.";
     default:
       return "Đang xử lý...";
   }

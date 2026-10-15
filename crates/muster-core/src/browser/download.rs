@@ -8,6 +8,9 @@ use super::detect::{WINDOWS_BINARY, WINDOWS_SUBDIR, chrome_for_testing_binary};
 pub const CFT_MANIFEST_URL: &str = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 pub const CFT_WINDOWS_PLATFORM: &str = "win64";
 
+pub const APPCONTAINER_GRANT: &str = "*S-1-15-2-1:(OI)(CI)(RX)";
+pub const APPCONTAINER_ACE_NAME: &str = "ALL APPLICATION PACKAGES";
+
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
     #[error("lỗi HTTP: {0}")]
@@ -24,6 +27,9 @@ pub enum DownloadError {
 
     #[error("giải nén thất bại: {0}")]
     Zip(String),
+
+    #[error("cấp ACE AppContainer cho {0} thất bại: {1}")]
+    Acl(String, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +196,37 @@ pub fn extract_chrome(archive: &Path, destination: &Path) -> Result<PathBuf, Dow
     }
 }
 
+pub fn grant_app_container_access(directory: &Path) -> Result<(), DownloadError> {
+    let output = std::process::Command::new("icacls")
+        .arg(directory)
+        .args(["/grant", APPCONTAINER_GRANT, "/t", "/c", "/q"])
+        .output()?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+
+    Err(DownloadError::Acl(
+        directory.display().to_string(),
+        if detail.is_empty() {
+            format!("mã thoát {:?}", output.status.code())
+        } else {
+            detail
+        },
+    ))
+}
+
+#[must_use]
+pub fn has_app_container_access(directory: &Path) -> bool {
+    let Ok(output) = std::process::Command::new("icacls").arg(directory).output() else {
+        return false;
+    };
+
+    String::from_utf8_lossy(&output.stdout).contains(APPCONTAINER_ACE_NAME)
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -348,6 +385,38 @@ mod tests {
 
         let error = extract_chrome(&archive_path, &dir.join("out")).expect_err("phai loi");
         assert!(matches!(error, DownloadError::Zip(_)), "gap: {error:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unpacked_directory_gets_the_app_container_ace() {
+        let dir = temp_dir("acl");
+        let binary_dir = dir.join(WINDOWS_SUBDIR);
+        std::fs::create_dir_all(&binary_dir).expect("tao thu muc");
+        let binary = binary_dir.join(WINDOWS_BINARY);
+        std::fs::write(&binary, b"stub").expect("ghi file");
+
+        grant_app_container_access(&dir).expect("cap ACE");
+
+        assert!(
+            has_app_container_access(&dir),
+            "thu muc cai phai co ACE cho {APPCONTAINER_ACE_NAME}"
+        );
+        assert!(
+            has_app_container_access(&binary),
+            "chrome.exe phai huong ACE tu thu muc cha"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_directory_reports_no_app_container_access() {
+        let dir = temp_dir("acl-missing");
+        let absent = dir.join("khong-ton-tai");
+
+        assert!(!has_app_container_access(&absent));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
