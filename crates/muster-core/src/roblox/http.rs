@@ -2,6 +2,7 @@
 pub enum HttpMethod {
     Get,
     Post,
+    Patch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -14,6 +14,8 @@ pub const NO_ENCRYPTION_FLAG: &str = "NoEncryption.IUnderstandTheRisks.iautamor"
 pub const ACCOUNT_COPY_SUFFIXES: [&str; 3] = ["backup", "old", "bak"];
 
 pub const APP_DIR_NAME: &str = "muster";
+pub const SETTINGS_JSON_FILE: &str = "settings.json";
+pub const SETTINGS_TOML_LEGACY: &str = "settings.toml";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
@@ -222,7 +224,7 @@ pub fn migrate(
     if let Some(ini_path) = install.settings.as_ref() {
         let ini = IniFile::from_path(ini_path)?;
         let migrated = Settings::from_ini(&ini);
-        migrated.save(&out_dir.join("settings.toml"))?;
+        migrated.save_json(&out_dir.join(SETTINGS_JSON_FILE))?;
         settings_written = true;
 
         if ini
@@ -311,8 +313,81 @@ pub fn portable_data_dir() -> PathBuf {
 }
 
 #[must_use]
+pub fn app_data_dir() -> PathBuf {
+    default_data_dir()
+}
+
+pub fn ensure_app_data_dir() -> PathBuf {
+    let dir = app_data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+#[must_use]
+pub fn settings_json_path() -> PathBuf {
+    app_data_dir().join(SETTINGS_JSON_FILE)
+}
+
+#[must_use]
+pub fn settings_toml_legacy_path() -> PathBuf {
+    app_data_dir().join(SETTINGS_TOML_LEGACY)
+}
+
+#[must_use]
+pub fn account_data_path() -> PathBuf {
+    app_data_dir().join(ACCOUNT_FILE)
+}
+
+#[must_use]
 pub fn portable_account_file() -> PathBuf {
-    portable_data_dir().join(ACCOUNT_FILE)
+    account_data_path()
+}
+
+fn copy_tree_if_missing(from: &Path, to: &Path) -> std::io::Result<()> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    if to.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(to.parent().unwrap_or(to))?;
+    copy_dir_recursive(from, to)
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else if !target.exists() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn migrate_legacy_portable_data() {
+    let portable = portable_data_dir();
+    let app_data = ensure_app_data_dir();
+    if portable == app_data {
+        return;
+    }
+
+    let portable_account = portable.join(ACCOUNT_FILE);
+    let app_account = app_data.join(ACCOUNT_FILE);
+    if portable_account.is_file() && !app_account.exists() {
+        let _ = std::fs::copy(&portable_account, &app_account);
+    }
+
+    let portable_settings = portable.join(SETTINGS_TOML_LEGACY);
+    let app_settings = app_data.join(SETTINGS_TOML_LEGACY);
+    if portable_settings.is_file() && !app_settings.exists() {
+        let _ = std::fs::copy(&portable_settings, &app_settings);
+    }
+
+    let _ = copy_tree_if_missing(&portable.join("browser"), &app_data.join("browser"));
 }
 
 #[cfg(test)]
@@ -531,9 +606,9 @@ mod tests {
         assert!(report.settings_written);
         assert!(report.backup.exists());
         assert!(out.join(ACCOUNT_FILE).exists());
-        assert!(out.join("settings.toml").exists());
+        assert!(out.join(SETTINGS_JSON_FILE).exists());
 
-        let settings = Settings::load(&out.join("settings.toml")).expect("đọc settings");
+        let settings = Settings::load_json(&out.join(SETTINGS_JSON_FILE)).expect("đọc settings");
         assert_eq!(settings.web_server.web_server_port, 8080);
         assert!(!settings.general.save_passwords);
 
@@ -626,7 +701,7 @@ mod tests {
         let report = migrate(&install, &out, None).expect("nhập");
 
         assert!(!report.settings_written);
-        assert!(!out.join("settings.toml").exists());
+        assert!(!out.join(SETTINGS_JSON_FILE).exists());
         assert_eq!(report.accounts_written, 2);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -664,6 +739,13 @@ mod tests {
     fn portable_account_file_points_at_the_account_data_file() {
         let path = portable_account_file();
         assert!(path.ends_with(ACCOUNT_FILE));
-        assert_eq!(path.parent(), Some(portable_data_dir().as_path()));
+        assert_eq!(path.parent(), Some(app_data_dir().as_path()));
+        assert_eq!(settings_json_path().parent(), path.parent());
+        assert_eq!(
+            crate::browser::detect::chrome_for_testing_root(&app_data_dir())
+                .parent()
+                .and_then(Path::parent),
+            path.parent()
+        );
     }
 }

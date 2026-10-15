@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand};
 use muster_core::import;
 use muster_core::vault::{self, Branch};
 
+mod backend;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "muster-cli",
@@ -43,6 +45,24 @@ enum Command {
     Serve {
         #[arg(long, default_value_t = muster_api::DEFAULT_PORT)]
         port: u16,
+
+        #[arg(long, value_name = "PW")]
+        password: Option<String>,
+
+        #[arg(long)]
+        every_request_requires_password: bool,
+
+        #[arg(long)]
+        allow_get_accounts: bool,
+
+        #[arg(long)]
+        allow_get_cookie: bool,
+
+        #[arg(long)]
+        allow_launch_account: bool,
+
+        #[arg(long)]
+        allow_account_editing: bool,
     },
 }
 
@@ -79,10 +99,80 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             let password = resolve_password(password, password_stdin)?;
             run_import(&from, password.as_deref(), out, dry_run)
         }
-        Command::Serve { port } => {
-            anyhow::bail!("`serve` chua lam — thuoc M2 (cong: {port})")
-        }
+        Command::Serve {
+            port,
+            password,
+            every_request_requires_password,
+            allow_get_accounts,
+            allow_get_cookie,
+            allow_launch_account,
+            allow_account_editing,
+        } => run_serve(ServeOptions {
+            port,
+            password,
+            every_request_requires_password,
+            allow_get_accounts,
+            allow_get_cookie,
+            allow_launch_account,
+            allow_account_editing,
+        }),
     }
+}
+
+struct ServeOptions {
+    port: u16,
+    password: Option<String>,
+    every_request_requires_password: bool,
+    allow_get_accounts: bool,
+    allow_get_cookie: bool,
+    allow_launch_account: bool,
+    allow_account_editing: bool,
+}
+
+fn run_serve(options: ServeOptions) -> anyhow::Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    rt.block_on(async {
+        let data_file = import::portable_account_file();
+        let accounts = if data_file.is_file() {
+            vault::read_accounts_from_path(&data_file, None)
+                .map(|(accs, _)| accs)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let store = std::sync::Arc::new(std::sync::Mutex::new(
+            muster_core::roblox::account::AccountStore::from_accounts(accounts),
+        ));
+        let backend = std::sync::Arc::new(backend::LiveBackend::new(std::sync::Arc::clone(&store)));
+
+        let mut state = muster_api::ApiState::with_store(store).with_backend(backend);
+
+        state.allow_get_accounts = options.allow_get_accounts;
+        state.allow_get_cookie = options.allow_get_cookie;
+        state.allow_launch_account = options.allow_launch_account;
+        state.allow_account_editing = options.allow_account_editing;
+        state.every_request_requires_password = options.every_request_requires_password;
+
+        if let Some(password) = options.password {
+            state = state.with_password(password);
+        }
+
+        let state = std::sync::Arc::new(state);
+
+        println!(
+            "Muster API server đang chạy tại http://127.0.0.1:{}",
+            options.port
+        );
+        println!("(chỉ nhận kết nối từ localhost)");
+
+        muster_api::start_server(options.port, state)
+            .await
+            .map_err(|e| anyhow::anyhow!("Lỗi server: {e}"))
+    })
 }
 
 fn resolve_password(from_flag: Option<String>, from_stdin: bool) -> anyhow::Result<Option<String>> {
@@ -211,7 +301,7 @@ fn run_import(
     if report.settings_written {
         println!(
             "              cau hinh -> {}",
-            report.out_dir.join("settings.toml").display()
+            report.out_dir.join(import::SETTINGS_JSON_FILE).display()
         );
     }
     for warning in &report.warnings {

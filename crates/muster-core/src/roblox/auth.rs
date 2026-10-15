@@ -31,6 +31,9 @@ pub enum AuthError {
     #[error("Roblox không trả về header x-csrf-token (HTTP {status})")]
     MissingCsrfToken { status: u16 },
 
+    #[error("Cookie .ROBLOSECURITY không hợp lệ hoặc đã hết hạn (HTTP 401 Unauthorized)")]
+    Unauthorized,
+
     #[error("Roblox không trả về header rbx-authentication-ticket (HTTP {status})")]
     MissingTicket { status: u16 },
 
@@ -76,6 +79,9 @@ impl<T: Transport> AuthClient<T> {
 
     pub fn csrf_token(&self, cookie: &str) -> Result<String, AuthError> {
         let response = self.transport.execute(&self.ticket_request(cookie, None))?;
+        if response.status == 401 {
+            return Err(AuthError::Unauthorized);
+        }
         extract_csrf_token(&response)
     }
 
@@ -103,7 +109,13 @@ impl<T: Transport> AuthClient<T> {
     }
 
     pub fn login(&self, username: &str, password: &str) -> Result<Zeroizing<String>, AuthError> {
-        let bootstrap = self.transport.execute(&self.ticket_request("", None))?;
+        let bootstrap_request =
+            HttpRequest::new(HttpMethod::Post, join(&self.endpoints.auth, "v2/login"))
+                .with_header("Referer", BROWSER_REFERER);
+        let bootstrap = self.transport.execute(&bootstrap_request)?;
+        if bootstrap.status == 401 {
+            return Err(AuthError::Unauthorized);
+        }
         let csrf = extract_csrf_token(&bootstrap)?;
 
         let body = login_body(username, password);
@@ -143,6 +155,16 @@ impl<T: Transport> AuthClient<T> {
 
         request
     }
+}
+
+#[must_use]
+pub fn sanitize_cookie(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    unquoted.trim().to_owned()
 }
 
 #[must_use]
@@ -356,6 +378,35 @@ mod tests {
         let error = client(&script).csrf_token("COOKIE").expect_err("phải lỗi");
 
         assert_eq!(error, AuthError::MissingCsrfToken { status: 200 });
+    }
+
+    #[test]
+    fn a_401_on_the_csrf_fetch_means_the_cookie_is_dead_not_a_missing_header() {
+        let script = Scripted::new(vec![HttpResponse::new(401)]);
+        let error = client(&script).csrf_token("COOKIE").expect_err("phải lỗi");
+
+        assert_eq!(error, AuthError::Unauthorized);
+    }
+
+    #[test]
+    fn a_401_on_the_login_bootstrap_is_reported_as_unauthorized() {
+        let script = Scripted::new(vec![HttpResponse::new(401)]);
+        let error = client(&script).login("alice", "pw").expect_err("phải lỗi");
+
+        assert_eq!(error, AuthError::Unauthorized);
+    }
+
+    #[test]
+    fn cookies_are_trimmed_and_unquoted_before_use() {
+        assert_eq!(sanitize_cookie("  abc  "), "abc");
+        assert_eq!(sanitize_cookie("\"abc\""), "abc");
+        assert_eq!(sanitize_cookie(" \"abc\"\n"), "abc");
+        assert_eq!(sanitize_cookie(""), "");
+        assert_eq!(
+            sanitize_cookie("_|WARNING:-DO-NOT-SHARE-THIS.|XYZ"),
+            "_|WARNING:-DO-NOT-SHARE-THIS.|XYZ",
+            "tiền tố cảnh báo là một phần giá trị cookie thật, không được cắt"
+        );
     }
 
     #[test]

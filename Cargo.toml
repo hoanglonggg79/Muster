@@ -2,7 +2,7 @@
 #
 # Tên dự án đã chốt: Muster (2026-10-12). Nguồn duy nhất của tên nằm ở
 # [workspace.metadata.project] bên dưới. Nếu cần đổi tên:  tools/rename.sh <TenMoi>
-# Xem ROADMAP.md mục 12.
+# Xem ROADMAP.md §10.3.
 
 [workspace]
 resolver = "3"
@@ -29,7 +29,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-only"
 description = "Account manager for Roblox"
-repository = "https://github.com/CHANGE-ME/muster"
+repository = "https://github.com/hoanglonggg79/Muster"
 
 [workspace.dependencies]
 muster-core = { path = "crates/muster-core" }

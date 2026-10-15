@@ -17,6 +17,34 @@ export const commands = {
 	vaultImportRam: (dir: string, password: string | null) => typedError<number, string>(__TAURI_INVOKE("vault_import_ram", { dir, password })),
 	presenceBatch: (userIds: (number | null)[]) => typedError<PresenceInfo[], string>(__TAURI_INVOKE("presence_batch", { userIds })),
 	accountUpdate: (userId: number | null, alias: string, group: string | null, description: string, savedPlaceId: string | null, savedJobId: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("account_update", { userId, alias, group, description, savedPlaceId, savedJobId })),
+	accountCheckPin: (userId: number | null) => typedError<PinInfo, string>(__TAURI_INVOKE("account_check_pin", { userId })),
+	accountUnlockPin: (userId: number | null, pin: string) => typedError<PinInfo, string>(__TAURI_INVOKE("account_unlock_pin", { userId, pin })),
+	accountSetFollowPrivacy: (userId: number | null, privacy: number) => typedError<null, string>(__TAURI_INVOKE("account_set_follow_privacy", { userId, privacy })),
+	accountSetDisplayName: (userId: number | null, name: string) => typedError<null, string>(__TAURI_INVOKE("account_set_display_name", { userId, name })),
+	accountSetAvatar: (userId: number | null, avatarJson: string) => typedError<(number | null)[], string>(__TAURI_INVOKE("account_set_avatar", { userId, avatarJson })),
+	accountChangePassword: (userId: number | null, current: string, newPassword: string) => typedError<null, string>(__TAURI_INVOKE("account_change_password", { userId, current, newPassword })),
+	accountChangeEmail: (userId: number | null, password: string, email: string) => typedError<null, string>(__TAURI_INVOKE("account_change_email", { userId, password, email })),
+	accountLogoutOtherSessions: (userId: number | null) => typedError<null, string>(__TAURI_INVOKE("account_logout_other_sessions", { userId })),
+	accountBlockUser: (userId: number | null, targetId: number | null) => typedError<boolean, string>(__TAURI_INVOKE("account_block_user", { userId, targetId })),
+	accountUnblockUser: (userId: number | null, targetId: number | null) => typedError<boolean, string>(__TAURI_INVOKE("account_unblock_user", { userId, targetId })),
+	accountBlockedList: (userId: number | null) => typedError<(number | null)[], string>(__TAURI_INVOKE("account_blocked_list", { userId })),
+	accountUnblockEveryone: (userId: number | null) => typedError<number, string>(__TAURI_INVOKE("account_unblock_everyone", { userId })),
+	appInitState: () => typedError<AppInitState, string>(__TAURI_INVOKE("app_init_state")),
+	groupsList: () => typedError<GroupInfo[], string>(__TAURI_INVOKE("groups_list")),
+	groupRename: (from: string, to: string) => typedError<number, string>(__TAURI_INVOKE("group_rename", { from, to })),
+	groupAssign: (userId: number | null, group: string) => typedError<null, string>(__TAURI_INVOKE("group_assign", { userId, group })),
+	serversList: (placeId: number | null, cursor: string | null) => typedError<ServersPage_Serialize, string>(__TAURI_INVOKE("servers_list", { placeId, cursor })),
+	serversPickJob: (placeId: number | null, maxPages: number, lowestPlayers: boolean) => typedError<string | null, string>(__TAURI_INVOKE("servers_pick_job", { placeId, maxPages, lowestPlayers })),
+	gameDetails: (placeIds: (number | null)[], userId: number | null) => typedError<GameDetails[], string>(__TAURI_INVOKE("game_details", { placeIds, userId })),
+	thumbnailsBatch: (requests: ThumbnailRequestInput[]) => typedError<ThumbnailResult[], string>(__TAURI_INVOKE("thumbnails_batch", { requests })),
+	favoritesList: () => typedError<FavoriteGame_Serialize[], string>(__TAURI_INVOKE("favorites_list")),
+	favoriteAdd: (name: string, placeId: number | null, privateServer: string | null) => typedError<FavoriteGame_Serialize[], string>(__TAURI_INVOKE("favorite_add", { name, placeId, privateServer })),
+	favoriteRemove: (placeId: number | null, privateServer: string | null) => typedError<FavoriteGame_Serialize[], string>(__TAURI_INVOKE("favorite_remove", { placeId, privateServer })),
+	recentGames: () => typedError<RecentGame_Serialize[], string>(__TAURI_INVOKE("recent_games")),
+	recentPush: (name: string, placeId: number | null) => typedError<RecentGame_Serialize[], string>(__TAURI_INVOKE("recent_push", { name, placeId })),
+	browserStatus: () => __TAURI_INVOKE<BrowserStatus>("browser_status"),
+	browserDownloadChromium: () => typedError<string, string>(__TAURI_INVOKE("browser_download_chromium")),
+	browserOpenLogin: (username: string | null, password: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("browser_open_login", { username, password })),
 };
 
 /* Types */
@@ -52,9 +80,74 @@ export type Account_Serialize = {
 	BrowserTrackerID: string | null,
 };
 
+export type AppInitState = {
+	unlock_fps: boolean,
+	max_fps: number,
+	multi_roblox: boolean,
+};
+
 export type Branch = "PasswordLocked" | "Dpapi" | "PlainJson";
 
+export type BrowserProgress = {
+	phase: string,
+	downloaded: number,
+	total: number,
+	percent: number,
+};
+
+export type BrowserStatus = {
+	chrome_for_testing: string | null,
+	chrome_for_testing_version: string | null,
+	ready: boolean,
+};
+
+export type FavoriteGame = FavoriteGame_Serialize | FavoriteGame_Deserialize;
+
+export type FavoriteGame_Deserialize = {
+	name: string,
+} & {
+	placeId: number | null,
+} & {
+	privateServer?: string,
+};
+
+export type FavoriteGame_Serialize = {
+	name: string,
+	placeId: number | null,
+	privateServer: string,
+};
+
 export type Format = "PasswordLocked" | "Dpapi" | "PlainJson";
+
+export type GameDetails = {
+	placeId?: number | null,
+	universeId?: number | null,
+	name?: string,
+	sourceName?: string,
+	sourceDescription?: string,
+	description?: string,
+	builder?: string,
+	builderId?: number | null,
+	hasVerifiedBadge?: boolean,
+	isPlayable?: boolean,
+	reasonProhibited?: string | null,
+	universeRootPlaceId?: number | null,
+	price?: number | null,
+	url?: string,
+	imageToken?: string,
+};
+
+export type GroupInfo = {
+	name: string,
+	label: string,
+	count: number,
+};
+
+export type PinInfo = {
+	enabled: boolean,
+	unlocked_until: number | null,
+	is_unlocked: boolean,
+};
 
 export type PresenceInfo = {
 	user_id: number | null,
@@ -64,6 +157,77 @@ export type PresenceInfo = {
 };
 
 export type PresenceType = number;
+
+export type RecentGame = RecentGame_Serialize | RecentGame_Deserialize;
+
+export type RecentGame_Deserialize = {
+	name: string,
+} & {
+	placeId: number | null,
+} & {
+	imageUrl?: string | null,
+} & {
+	lastUsed?: string | null,
+};
+
+export type RecentGame_Serialize = {
+	name: string,
+	placeId: number | null,
+	imageUrl: string | null,
+	lastUsed: string | null,
+};
+
+export type ServerInfo = ServerInfo_Serialize | ServerInfo_Deserialize;
+
+export type ServerInfo_Deserialize = {
+	id?: string,
+	maxPlayers?: number | null,
+	playing?: number | null,
+	fps?: number | null,
+	ping?: number | null,
+	region?: string | null,
+	playerTokens?: string[],
+	vipServerId?: number | null,
+	accessCode?: string | null,
+};
+
+export type ServerInfo_Serialize = {
+	id: string,
+	maxPlayers: number | null,
+	playing: number | null,
+	fps: number | null,
+	ping: number | null,
+	region: string | null,
+	playerTokens: string[],
+	vipServerId: number | null,
+	accessCode: string | null,
+};
+
+export type ServersPage = ServersPage_Serialize | ServersPage_Deserialize;
+
+export type ServersPage_Deserialize = {
+	previousPageCursor?: string | null,
+	nextPageCursor?: string | null,
+	data?: ServerInfo_Deserialize[],
+};
+
+export type ServersPage_Serialize = {
+	previousPageCursor: string | null,
+	nextPageCursor: string | null,
+	data: ServerInfo_Serialize[],
+};
+
+export type ThumbnailRequestInput = {
+	asset_id: number | null,
+	kind: string,
+	size: string | null,
+	format: string | null,
+};
+
+export type ThumbnailResult = {
+	asset_id: number | null,
+	url: string,
+};
 
 export type VaultInspection = {
 	path: string,

@@ -35,6 +35,7 @@ impl Transport for ReqwestTransport {
         let method = match request.method {
             HttpMethod::Get => reqwest::Method::GET,
             HttpMethod::Post => reqwest::Method::POST,
+            HttpMethod::Patch => reqwest::Method::PATCH,
         };
 
         let mut builder = self.client.request(method, &request.url);

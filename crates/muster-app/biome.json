@@ -14,12 +14,12 @@
     "rules": {
       "preset": "recommended",
       "a11y": {
-        "noLabelWithoutControl": "warn",
-        "noStaticElementInteractions": "warn",
-        "useKeyWithClickEvents": "warn"
+        "noLabelWithoutControl": "error",
+        "noStaticElementInteractions": "error",
+        "useKeyWithClickEvents": "error"
       },
       "correctness": {
-        "useExhaustiveDependencies": "warn"
+        "useExhaustiveDependencies": "error"
       }
     }
   }

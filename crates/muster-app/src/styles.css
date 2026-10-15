@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   /* Dark stealth & Pure black palette */
   --bg-app: #000000;
@@ -382,6 +384,18 @@ body {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.drop-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-tertiary);
 }
 
 .input-field {
@@ -947,6 +961,15 @@ textarea.input-field {
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .batch-bar {
   display: flex;
   align-items: center;
@@ -1044,4 +1067,108 @@ textarea.input-field {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.group-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.group-bar__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.group-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.group-chip.active {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.group-chip__count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.group-bar__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.server-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.server-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 90px 90px 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.server-row__id {
+  font-family: monospace;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-row__meta {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.server-row__players {
+  color: var(--accent-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }

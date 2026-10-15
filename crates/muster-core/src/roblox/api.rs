@@ -45,6 +45,18 @@ struct ThumbnailsResponse {
     pub data: Vec<ThumbnailItem>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UsernameLookupResponse {
+    #[serde(default)]
+    pub data: Vec<UsernameLookupItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UsernameLookupItem {
+    pub id: i64,
+    pub name: String,
+}
+
 pub fn fetch_authenticated_user<T: Transport>(
     transport: &T,
     cookie: &str,
@@ -119,6 +131,37 @@ pub fn fetch_user_avatar_headshot<T: Transport>(
     Ok(url)
 }
 
+pub fn fetch_user_id_by_username<T: Transport>(
+    transport: &T,
+    username: &str,
+) -> Result<Option<i64>, ApiError> {
+    let url = "https://users.roblox.com/v1/usernames/users";
+    let body = serde_json::json!({
+        "usernames": [username],
+        "excludeBannedUsers": false,
+    })
+    .to_string();
+
+    let request = HttpRequest::new(HttpMethod::Post, url)
+        .with_header("Content-Type", "application/json")
+        .with_body(body);
+
+    let response = transport.execute(&request)?;
+    if !(200..300).contains(&response.status) {
+        return Err(ApiError::RequestFailed {
+            status: response.status,
+            message: response.body_as_str().unwrap_or("").to_owned(),
+        });
+    }
+
+    let payload: UsernameLookupResponse = serde_json::from_slice(&response.body)?;
+    Ok(payload
+        .data
+        .into_iter()
+        .find(|item| item.name.eq_ignore_ascii_case(username))
+        .map(|item| item.id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::http::HttpResponse;
@@ -178,5 +221,38 @@ mod tests {
 
         let robux = fetch_user_robux(&transport, 123, "cookie").unwrap();
         assert_eq!(robux, 9999);
+    }
+
+    #[test]
+    fn a_username_is_looked_up_case_insensitively() {
+        let body = r#"{"data":[{"id":987,"name":"RobloxFan"}]}"#;
+        let transport = MockTransport {
+            response: HttpResponse {
+                status: 200,
+                headers: vec![],
+                body: body.as_bytes().to_vec(),
+            },
+        };
+
+        assert_eq!(
+            fetch_user_id_by_username(&transport, "robloxfan").unwrap(),
+            Some(987)
+        );
+    }
+
+    #[test]
+    fn a_username_that_does_not_exist_yields_none() {
+        let transport = MockTransport {
+            response: HttpResponse {
+                status: 200,
+                headers: vec![],
+                body: b"{\"data\":[]}".to_vec(),
+            },
+        };
+
+        assert_eq!(
+            fetch_user_id_by_username(&transport, "ghost").unwrap(),
+            None
+        );
     }
 }

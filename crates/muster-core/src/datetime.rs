@@ -108,6 +108,51 @@ pub fn now_unix_millis() -> u64 {
         .map_or(0, |delta| delta.as_millis() as u64)
 }
 
+#[must_use]
+pub fn roblox_tick_from_json_net(text: &str) -> Option<f64> {
+    let year: i64 = text.get(0..4)?.parse().ok()?;
+    let month: u32 = text.get(5..7)?.parse().ok()?;
+    let day: u32 = text.get(8..10)?.parse().ok()?;
+    let hour: i64 = text.get(11..13)?.parse().ok()?;
+    let minute: i64 = text.get(14..16)?.parse().ok()?;
+    let second: i64 = text.get(17..19)?.parse().ok()?;
+
+    let millis = match text.get(20..) {
+        Some(fraction) if !fraction.is_empty() => {
+            let digits: Vec<u32> = fraction
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .filter_map(|character| character.to_digit(10))
+                .take(3)
+                .collect();
+
+            let mut value = 0u32;
+            for digit in &digits {
+                value = value * 10 + digit;
+            }
+            for _ in digits.len()..3 {
+                value *= 10;
+            }
+            value
+        }
+        _ => 0,
+    };
+
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
+
+    Some(seconds as f64 + f64::from(millis) / 1000.0)
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * i64::from(month_prime) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
     let shifted = days_since_epoch + 719_468;
     let era = if shifted >= 0 {
@@ -203,16 +248,6 @@ mod tests {
         assert_eq!(now.as_bytes()[16], b':');
     }
 
-    fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-        let year = if month <= 2 { year - 1 } else { year };
-        let era = if year >= 0 { year } else { year - 399 } / 400;
-        let year_of_era = year - era * 400;
-        let month_prime = if month > 2 { month - 3 } else { month + 9 };
-        let day_of_year = (153 * i64::from(month_prime) + 2) / 5 + i64::from(day) - 1;
-        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-        era * 146_097 + day_of_era - 719_468
-    }
-
     fn parse_json_net_to_unix(text: &str) -> i64 {
         let date = &text[..10];
         let time = &text[11..19.min(text.len())];
@@ -223,6 +258,29 @@ mod tests {
         let minute: i64 = time[3..5].parse().expect("phut");
         let second: i64 = time[6..8].parse().expect("giay");
         days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second
+    }
+
+    #[test]
+    fn the_roblox_tick_is_seconds_since_1970_plus_milliseconds() {
+        assert_eq!(roblox_tick_from_json_net("1970-01-01T00:00:00"), Some(0.0));
+        assert_eq!(
+            roblox_tick_from_json_net("1970-01-01T00:00:01.5"),
+            Some(1.5)
+        );
+        assert_eq!(
+            roblox_tick_from_json_net("2001-09-09T01:46:40"),
+            Some(1_000_000_000.0)
+        );
+
+        let with_ms = roblox_tick_from_json_net("2001-09-09T01:46:40.512").expect("doc duoc");
+        assert!((with_ms - 1_000_000_000.512).abs() < 1e-6, "gap: {with_ms}");
+    }
+
+    #[test]
+    fn a_broken_timestamp_returns_none_instead_of_panicking() {
+        assert_eq!(roblox_tick_from_json_net(""), None);
+        assert_eq!(roblox_tick_from_json_net("1970-01-01"), None);
+        assert_eq!(roblox_tick_from_json_net("khong-phai-thoi-gian"), None);
     }
 
     #[test]

@@ -18,6 +18,9 @@ pub enum SettingsError {
 
     #[error("không tuần tự hoá được TOML: {0}")]
     TomlWrite(#[from] toml::ser::Error),
+
+    #[error("JSON không hợp lệ: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Section = BTreeMap<String, String>;
@@ -267,6 +270,39 @@ impl Settings {
     pub fn save(&self, path: &Path) -> Result<(), SettingsError> {
         std::fs::write(path, self.to_toml_string()?)?;
         Ok(())
+    }
+
+    pub fn to_json_string(&self) -> Result<String, SettingsError> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    pub fn from_json_str(text: &str) -> Result<Self, SettingsError> {
+        Ok(serde_json::from_str(text)?)
+    }
+
+    pub fn load_json(path: &Path) -> Result<Self, SettingsError> {
+        Self::from_json_str(&std::fs::read_to_string(path)?)
+    }
+
+    pub fn save_json(&self, path: &Path) -> Result<(), SettingsError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, self.to_json_string()?)?;
+        Ok(())
+    }
+
+    pub fn load_preferred(json_path: &Path, legacy_toml_path: &Path) -> Self {
+        if json_path.is_file() {
+            return Self::load_json(json_path).unwrap_or_default();
+        }
+        if legacy_toml_path.is_file() {
+            if let Ok(settings) = Self::load(legacy_toml_path) {
+                let _ = settings.save_json(json_path);
+                return settings;
+            }
+        }
+        Self::default()
     }
 }
 

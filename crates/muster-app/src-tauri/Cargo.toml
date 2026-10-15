@@ -16,18 +16,19 @@ name = "muster-app"
 path = "src/main.rs"
 
 # Sinh bindings TypeScript. Tách thành binary riêng thay vì làm trong một test: test binary của
-# crate này không nạp được trên Windows (xem rủi ro #17 trong ROADMAP.md).
+# crate này không nạp được trên Windows (xem ROADMAP.md §6.1).
 [[bin]]
 name = "muster-codegen"
 path = "src/bin/codegen.rs"
 
 [dependencies]
 # `features = ["specta"]` bật derive specta::Type cho Account/Branch/Format — đây là hợp đồng
-# type giữa nhánh Rust và nhánh UI (ROADMAP mục 6.0-UI).
+# type giữa nhánh Rust và nhánh UI (ROADMAP.md §2.9).
 muster-core = { workspace = true, features = ["specta", "http-reqwest"] }
 tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
+getrandom.workspace = true
 
 # Sinh bindings TypeScript. Cả ba đều GHIM ĐÚNG BẢN rc — tauri-specta v2 chưa stable.
 specta.workspace = true
