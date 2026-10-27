@@ -39,7 +39,10 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# `time` + `sync` + `rt` phai khai TUONG MINH: crate app dung tokio::time::sleep / timeout va
+# tokio::sync::oneshot. Truoc day chung chi vao duoc qua feature cua mot dependency khac (tauri),
+# nen mot lan bump bat ky co the lam vo build. `rt` de `spawn_blocking` co mat o moi noi.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }

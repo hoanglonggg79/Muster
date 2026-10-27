@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use muster_core::browser::{detect, download, login};
 use muster_core::datetime::{now_local_json_net, now_unix_millis};
 use muster_core::import;
 use muster_core::launch::windows::{
@@ -41,6 +40,206 @@ pub const SAVED_PLACE_ID_FIELD: &str = "SavedPlaceId";
 pub const SAVED_JOB_ID_FIELD: &str = "SavedJobId";
 pub const HTTP_MIN_INTERVAL_MS: u64 = 200;
 pub const DEFAULT_FPS_CAP: u32 = 60;
+
+/// The hosts Roblox may set `.ROBLOSECURITY` on. WebView2 answers `GetCookies` per URI, and the
+/// login flow legitimately lands on `www.roblox.com`, bare `roblox.com` or `auth.roblox.com`; the
+/// cookie itself is scoped to `.roblox.com`, so we ask for the two stable entry points and take
+/// whichever returns it first.
+#[cfg(windows)]
+const COOKIE_PROBE_URIS: [&str; 2] = ["https://www.roblox.com", "https://roblox.com"];
+
+/// Read `.ROBLOSECURITY` out of a WebView2 cookie list.
+///
+/// Safe wrapper: the COM calls inside need `unsafe`, but every one is checked for HRESULT failure
+/// and the pointers are only dereferenced while `list` is alive.
+#[cfg(windows)]
+#[must_use]
+fn roblosecurity_from_cookie_list(
+    list: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2CookieList,
+) -> Option<String> {
+    unsafe { roblosecurity_from_cookie_list_inner(list) }
+}
+
+/// # Safety
+/// The caller must be on the UI thread with `list` still alive (only true inside the `GetCookies`
+/// callback).
+#[cfg(windows)]
+#[must_use]
+unsafe fn roblosecurity_from_cookie_list_inner(
+    list: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2CookieList,
+) -> Option<String> {
+    unsafe {
+        let mut count = 0u32;
+        list.Count(&mut count).ok()?;
+
+        for i in 0..count {
+            let Ok(cookie) = list.GetValueAtIndex(i) else {
+                continue;
+            };
+            let mut name_pwstr = windows_core::PWSTR::null();
+            let mut value_pwstr = windows_core::PWSTR::null();
+            if cookie.Name(&mut name_pwstr).is_err() || cookie.Value(&mut value_pwstr).is_err() {
+                continue;
+            }
+
+            let name = name_pwstr.to_string().unwrap_or_default();
+            let value = value_pwstr.to_string().unwrap_or_default();
+            if name == ".ROBLOSECURITY" && !value.trim().is_empty() {
+                return Some(value);
+            }
+        }
+
+        None
+    }
+}
+
+/// Query every probe URI and send the first `.ROBLOSECURITY` found through `tx`.
+///
+/// Each `GetCookies` is asynchronous, so the sender is shared through an `Arc<Mutex<Option<_>>>`
+/// and `take()`n exactly once. Results are only *sent*, never dropped: a probe that finds nothing
+/// simply leaves the sender in place for the next URI, and the caller may reuse the same channel on
+/// a later poll.
+#[cfg(windows)]
+fn extract_roblox_security_cookie_tx(
+    window: &tauri::WebviewWindow,
+    tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
+) -> Result<(), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    use windows_core::Interface;
+
+    window
+        .with_webview(move |wv| unsafe {
+            let Ok(controller) = wv.controller().CoreWebView2() else {
+                return;
+            };
+            let Ok(wv2) = controller.cast::<ICoreWebView2_2>() else {
+                return;
+            };
+            let Ok(manager) = wv2.CookieManager() else {
+                return;
+            };
+
+            for uri in COOKIE_PROBE_URIS {
+                if tx.lock().is_ok_and(|guard| guard.is_none()) {
+                    // Already answered by an earlier URI in this batch.
+                    break;
+                }
+
+                let tx = Arc::clone(&tx);
+                let handler = webview2_com::GetCookiesCompletedHandler::create(Box::new(
+                    move |_res, list| {
+                        let Some(list) = list else {
+                            return Ok(());
+                        };
+                        let Some(value) = roblosecurity_from_cookie_list(&list) else {
+                            return Ok(());
+                        };
+
+                        if let Ok(mut guard) = tx.lock() {
+                            if let Some(sender) = guard.take() {
+                                let _ = sender.send(value);
+                            }
+                        }
+                        Ok(())
+                    },
+                ));
+
+                let wide: Vec<u16> = uri.encode_utf16().chain(std::iter::once(0)).collect();
+                let uri_pcwstr = windows_core::PCWSTR(wide.as_ptr());
+                let _ = manager.GetCookies(uri_pcwstr, &handler);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+fn extract_roblox_security_cookie_tx(
+    _window: &tauri::WebviewWindow,
+    _tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
+) -> Result<(), String> {
+    Err("WebView2 chỉ hỗ trợ trên Windows".to_string())
+}
+
+/// Ask the UI thread for one cookie probe. The returned receiver stays valid across polls because
+/// callers reuse the sender through [`PendingCookieProbe`].
+fn request_cookie_on_main_thread(
+    app: &AppHandle,
+    label: &str,
+    tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let label = label.to_string();
+    let app_handle = app.clone();
+
+    app.run_on_main_thread(move || {
+        if let Some(window) = app_handle.get_webview_window(&label) {
+            let _ = extract_roblox_security_cookie_tx(&window, tx);
+        }
+        // Window gone: keep the sender so the caller's receiver is not spuriously disconnected.
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// A cookie probe whose sender is retained between polls.
+///
+/// The old implementation created a fresh `oneshot` channel every 800 ms and abandoned the receiver
+/// after 1 s. Because `Sender::send` fails silently once the receiver is dropped, a slow WebView2
+/// callback lost the cookie outright and the value had to be re-fetched. Here the receiver is created
+/// once and the sender is `take()`n only when a value is actually delivered, so a late callback still
+/// lands.
+pub struct PendingCookieProbe {
+    rx: tokio::sync::oneshot::Receiver<String>,
+    tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>>,
+    answered: bool,
+}
+
+impl PendingCookieProbe {
+    #[must_use]
+    pub fn new() -> Self {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        Self {
+            rx,
+            tx: Arc::new(Mutex::new(Some(tx))),
+            answered: false,
+        }
+    }
+
+    fn sender(&self) -> Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>> {
+        Arc::clone(&self.tx)
+    }
+
+    /// Whether a cookie has already been delivered.
+    #[must_use]
+    pub fn is_answered(&self) -> bool {
+        self.answered
+    }
+
+    /// Non-blocking check for a delivered cookie. Used by the polling loop so a value that arrives
+    /// between ticks is not missed.
+    pub fn try_take(&mut self) -> Option<String> {
+        if self.answered {
+            return None;
+        }
+
+        let value = match self.rx.try_recv() {
+            Ok(value) => value,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return None,
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                self.answered = true;
+                return None;
+            }
+        };
+
+        self.answered = true;
+        Some(value)
+    }
+}
+
+impl Default for PendingCookieProbe {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Serialize, Type)]
 pub struct AppInitState {
@@ -97,15 +296,32 @@ impl From<PinState> for PinInfo {
 }
 
 pub struct AppState {
-    pub store: Mutex<AccountStore>,
+    pub store: Arc<Mutex<AccountStore>>,
     pub mutex_guard: Mutex<Option<SingletonMutex>>,
     pub data_file: PathBuf,
     pub data_dir: PathBuf,
     pub settings: Mutex<Settings>,
     pub limiter: Arc<RateLimiter>,
+    /// Bumped every time `browser_open_login` starts. An older invocation whose token no longer
+    /// matches has been superseded and must bail out instead of running two loops over the same
+    /// window (which used to report a phantom "window closed" error on the stale one).
+    pub login_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AppState {
+    /// Start a new login generation, superseding any loop still in flight.
+    fn next_login_generation(&self) -> u64 {
+        self.login_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
+    fn is_current_login(&self, generation: u64) -> bool {
+        self.login_generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == generation
+    }
+
     fn save_accounts(&self) -> Result<(), String> {
         let store = self.store.lock().map_err(|e| e.to_string())?;
         vault::write_accounts(&self.data_file, store.accounts()).map_err(|e| e.to_string())
@@ -193,17 +409,53 @@ fn account_list(state: State<AppState>) -> Result<Vec<Account>, String> {
     Ok(store.accounts().to_vec())
 }
 
-fn add_account_from_cookie(
-    state: &AppState,
+/// The parts of [`AppState`] that account creation needs, owned so the whole (blocking) job can be
+/// moved onto `spawn_blocking`. `AppState` itself cannot be moved: it is managed by Tauri and the
+/// borrow of `State<'_, AppState>` cannot outlive the command.
+#[derive(Clone)]
+pub struct AccountWriter {
+    pub store: Arc<Mutex<AccountStore>>,
+    pub data_file: PathBuf,
+    pub limiter: Arc<RateLimiter>,
+}
+
+impl AccountWriter {
+    fn from_state(state: &AppState) -> Self {
+        Self {
+            store: Arc::clone(&state.store),
+            data_file: state.data_file.clone(),
+            limiter: Arc::clone(&state.limiter),
+        }
+    }
+
+    fn http_transport(&self) -> Result<RetryTransport<ReqwestTransport>, String> {
+        ReqwestTransport::new()
+            .map(|transport| RetryTransport::new(transport).with_limiter(Arc::clone(&self.limiter)))
+            .map_err(|error| error.to_string())
+    }
+
+    fn save_accounts(&self) -> Result<(), String> {
+        let store = self.store.lock().map_err(|e| e.to_string())?;
+        vault::write_accounts(&self.data_file, store.accounts()).map_err(|e| e.to_string())
+    }
+}
+
+/// Blocking: performs network calls and, through `reqwest::blocking`, owns a Tokio runtime of its
+/// own. MUST NOT be called directly from an `async fn` — dropping the `ReqwestTransport` inside an
+/// async context panics with "Cannot drop a runtime in a context where blocking is not allowed."
+/// Callers on the async side must go through `spawn_blocking` (see `add_account_from_cookie`).
+fn add_account_from_cookie_blocking(
+    writer: &AccountWriter,
     cookie: &str,
     alias: Option<String>,
+    password: Option<String>,
 ) -> Result<Account, String> {
     let cookie = roblox_auth::sanitize_cookie(cookie);
     if cookie.is_empty() {
         return Err("Cookie .ROBLOSECURITY rỗng".to_owned());
     }
 
-    let transport = http_transport(state)?;
+    let transport = writer.http_transport()?;
     let user_info = fetch_authenticated_user(&transport, &cookie).map_err(|e| e.to_string())?;
 
     let robux = fetch_user_robux(&transport, user_info.id, &cookie).unwrap_or(0);
@@ -224,7 +476,7 @@ fn add_account_from_cookie(
         last_use: now_local_json_net(),
         alias: alias.unwrap_or(user_info.display_name),
         description: String::new(),
-        password: String::new(),
+        password: password.unwrap_or_default(),
         group: None,
         user_id: user_info.id,
         fields,
@@ -234,14 +486,29 @@ fn add_account_from_cookie(
     };
 
     let index = {
-        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        let mut store = writer.store.lock().map_err(|e| e.to_string())?;
         let (_, index) = store.add(account).map_err(|e| e.to_string())?;
         index
     };
-    state.save_accounts()?;
+    writer.save_accounts()?;
 
-    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let store = writer.store.lock().map_err(|e| e.to_string())?;
     store.get(index).cloned().map_err(|e| e.to_string())
+}
+
+/// Async entry point: hands the blocking work to a dedicated blocking thread so no Tokio runtime is
+/// ever constructed or dropped on an async worker.
+async fn add_account_from_cookie(
+    writer: AccountWriter,
+    cookie: String,
+    alias: Option<String>,
+    password: Option<String>,
+) -> Result<Account, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        add_account_from_cookie_blocking(&writer, &cookie, alias, password)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -251,7 +518,7 @@ fn account_add_cookie(
     alias: Option<String>,
     state: State<AppState>,
 ) -> Result<Account, String> {
-    add_account_from_cookie(&state, &cookie, alias)
+    add_account_from_cookie_blocking(&AccountWriter::from_state(&state), &cookie, alias, None)
 }
 
 #[tauri::command]
@@ -832,6 +1099,48 @@ pub const BROWSER_DEVTOOLS_TIMEOUT_SECONDS: u64 = 30;
 pub const BROWSER_LOGIN_TIMEOUT_SECONDS: u64 = 600;
 pub const BROWSER_FORM_TIMEOUT_SECONDS: u64 = 60;
 
+/// How often the login loop asks WebView2 for cookies.
+pub const COOKIE_POLL_INTERVAL_MS: u64 = 800;
+
+/// How many times the auto-fill script is re-run while the login page boots (1s apart).
+pub const LOGIN_AUTOFILL_ATTEMPTS: usize = 15;
+
+/// Build the credential-filling script.
+///
+/// Roblox's login form is React-controlled: assigning `input.value` updates the DOM but not React's
+/// internal value tracker, so React re-renders and wipes the text, and the form submits empty. The
+/// fix is the standard React workaround: call the *native* value setter through
+/// `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set` so React's tracker
+/// observes the change, then dispatch an `input` event. React's synthetic `onChange` listens for
+/// `input`, not `change`, so both are dispatched for good measure.
+#[must_use]
+fn autofill_credentials_script(user: &str, pass: &str) -> String {
+    format!(
+        r#"(() => {{
+            const setNative = (el, value) => {{
+                const setter = Object.getOwnPropertyDescriptor(
+                    HTMLInputElement.prototype, 'value'
+                ).set;
+                setter.call(el, value);
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }};
+            const u = document.querySelector('#login-username')
+                || document.querySelector('input[name="username"]')
+                || document.querySelector('input[autocomplete="username"]');
+            const p = document.querySelector('#login-password')
+                || document.querySelector('input[name="password"]')
+                || document.querySelector('input[type="password"]');
+            let filled = false;
+            if (u && !u.value) {{ setNative(u, {user_json}); filled = true; }}
+            if (p && !p.value) {{ setNative(p, {pass_json}); filled = true; }}
+            return filled ? 'true' : 'false';
+        }})()"#,
+        user_json = serde_json::to_string(user).unwrap_or_default(),
+        pass_json = serde_json::to_string(pass).unwrap_or_default(),
+    )
+}
+
 fn favorites_path(state: &AppState) -> PathBuf {
     state.data_dir.join(games::FAVORITES_FILE)
 }
@@ -1062,17 +1371,15 @@ fn recent_push(
     Ok(recent)
 }
 
+pub const LOGIN_WINDOW_LABEL: &str = "roblox-login";
+
 #[tauri::command]
 #[specta::specta]
 fn browser_status() -> BrowserStatus {
-    let data_dir = import::app_data_dir();
-    let chrome_for_testing = detect::installed_chrome_for_testing(&data_dir)
-        .map(|path| path.to_string_lossy().into_owned());
-
     BrowserStatus {
-        ready: chrome_for_testing.is_some(),
-        chrome_for_testing,
-        chrome_for_testing_version: detect::installed_version(&data_dir),
+        ready: true,
+        chrome_for_testing: None,
+        chrome_for_testing_version: Some("Edge WebView2 (Native Windows)".to_string()),
     }
 }
 
@@ -1101,107 +1408,10 @@ fn emit_browser_progress(app: &AppHandle, phase: &str, downloaded: f64, total: f
     );
 }
 
-fn download_chromium_blocking(app: &AppHandle) -> Result<String, String> {
-    let data_dir = import::ensure_app_data_dir();
-    let release = download::fetch_stable_release().map_err(|e| e.to_string())?;
-
-    let version_dir = detect::chrome_for_testing_root(&data_dir).join(&release.version);
-    if detect::chrome_for_testing_binary(&version_dir).is_file() {
-        emit_browser_progress(app, "granting", 1.0, 1.0);
-        download::grant_app_container_access(&version_dir).map_err(|e| e.to_string())?;
-        emit_browser_progress(app, "ready", 1.0, 1.0);
-        return Ok(version_dir.to_string_lossy().into_owned());
-    }
-
-    let archive = data_dir.join("browser").join("chrome-win64.zip");
-    if let Some(parent) = archive.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    emit_browser_progress(app, "connecting", 0.0, 0.0);
-
-    let progress_app = app.clone();
-    let mut last_progress = std::time::Instant::now() - Duration::from_secs(1);
-    download::download_to_file(&release.url, &archive, move |downloaded, total| {
-        if last_progress.elapsed() >= Duration::from_millis(100) || downloaded == total {
-            emit_browser_progress(
-                &progress_app,
-                "downloading",
-                downloaded as f64,
-                total as f64,
-            );
-            last_progress = std::time::Instant::now();
-        }
-    })
-    .map_err(|e| e.to_string())?;
-
-    if let Some(expected) = &release.sha256 {
-        if !download::verify_sha256(&archive, expected) {
-            let _ = std::fs::remove_file(&archive);
-            return Err(
-                "Gói Chromium tải về không khớp SHA-256; đã xoá để không chạy mã lạ".to_owned(),
-            );
-        }
-    }
-
-    emit_browser_progress(app, "extracting", 1.0, 1.0);
-
-    let binary = download::extract_chrome(&archive, &version_dir).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&archive);
-
-    emit_browser_progress(app, "granting", 1.0, 1.0);
-    download::grant_app_container_access(&version_dir).map_err(|e| e.to_string())?;
-
-    emit_browser_progress(app, "ready", 1.0, 1.0);
-    Ok(binary.to_string_lossy().into_owned())
-}
-
 #[tauri::command]
 #[specta::specta]
-async fn browser_download_chromium(app: AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || download_chromium_blocking(&app))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-fn emit_login_phase(app: &AppHandle, phase: &login::LoginPhase) {
-    let label = match phase {
-        login::LoginPhase::Launching => "launching",
-        login::LoginPhase::WaitingLogin => "waiting-login",
-        login::LoginPhase::FillingForm => "filling-form",
-        login::LoginPhase::ManualLoginRequired(_) => "manual-login",
-    };
-
-    emit_browser_progress(app, label, 0.0, 0.0);
-}
-
-fn run_browser_login(
-    app: &AppHandle,
-    credentials: Option<(String, String)>,
-) -> Result<String, String> {
-    let data_dir = import::ensure_app_data_dir();
-
-    let executable = detect::installed_chrome_for_testing(&data_dir)
-        .ok_or_else(|| login::NO_BROWSER_MESSAGE.to_owned())?;
-
-    let request = login::LoginRequest {
-        executable: &executable,
-        data_dir: &data_dir,
-        credentials: credentials
-            .as_ref()
-            .map(|(username, password)| (username.as_str(), password.as_str())),
-    };
-
-    let timings = login::LoginTimings {
-        devtools: Duration::from_secs(BROWSER_DEVTOOLS_TIMEOUT_SECONDS),
-        form: Duration::from_secs(BROWSER_FORM_TIMEOUT_SECONDS),
-        login: Duration::from_secs(BROWSER_LOGIN_TIMEOUT_SECONDS),
-    };
-
-    login::run_login(&request, &timings, &mut |phase| {
-        emit_login_phase(app, &phase)
-    })
-    .map_err(|error| error.to_string())
+async fn browser_download_chromium() -> Result<String, String> {
+    Ok("WebView2 sẵn sàng".to_string())
 }
 
 #[tauri::command]
@@ -1212,18 +1422,124 @@ async fn browser_open_login(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<Account, String> {
-    let credentials = match (username, password) {
-        (Some(user), Some(pass)) if !user.trim().is_empty() && !pass.is_empty() => {
-            Some((user.trim().to_owned(), pass))
+    use tauri::Manager;
+
+    let saved_password = password.clone();
+    let url = tauri::Url::parse("https://www.roblox.com/login").map_err(|e| e.to_string())?;
+
+    // Supersede any login loop still polling: it will notice the generation changed and exit
+    // quietly instead of racing us for the window.
+    let generation = state.next_login_generation();
+
+    if let Some(existing) = app.get_webview_window(LOGIN_WINDOW_LABEL) {
+        let _ = existing.close();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    emit_browser_progress(&app, "launching", 0.0, 0.0);
+
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        LOGIN_WINDOW_LABEL,
+        tauri::WebviewUrl::External(url),
+    )
+    .title("Đăng nhập Roblox — Muster")
+    .inner_size(860.0, 780.0)
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    emit_browser_progress(&app, "waiting-login", 0.0, 0.0);
+
+    if let (Some(user), Some(pass)) = (
+        username.filter(|u| !u.trim().is_empty()),
+        password.filter(|p| !p.is_empty()),
+    ) {
+        let w_clone = window.clone();
+        tauri::async_runtime::spawn(async move {
+            for _ in 0..LOGIN_AUTOFILL_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+
+                // Only stop once the renderer actually reports success, so a page that is still
+                // loading gets retried instead of silently giving up.
+                // `eval_with_callback` takes a `Fn`, so the sender is shared and `take()`n once.
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                let tx = Arc::new(Mutex::new(Some(tx)));
+                let script = autofill_credentials_script(&user, &pass);
+                if w_clone
+                    .eval_with_callback(script, move |result| {
+                        if let Ok(mut guard) = tx.lock() {
+                            if let Some(tx) = guard.take() {
+                                let _ = tx.send(result);
+                            }
+                        }
+                    })
+                    .is_err()
+                {
+                    // Window is gone; nothing left to fill.
+                    break;
+                }
+
+                match rx.await {
+                    // The script returns "true" only when it could fill at least one field.
+                    Ok(result) if result.trim() == "true" => break,
+                    Ok(_) => continue,
+                    // Window closed while the script was running.
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    let start_time = std::time::Instant::now();
+    let timeout = Duration::from_secs(BROWSER_LOGIN_TIMEOUT_SECONDS);
+    let mut probe = PendingCookieProbe::new();
+
+    let cookie: String = loop {
+        // Sleep briefly before each poll to avoid hammering the main thread.
+        tokio::time::sleep(Duration::from_millis(COOKIE_POLL_INTERVAL_MS)).await;
+
+        // A newer login superseded us: exit without touching the window it now owns.
+        if !state.is_current_login(generation) {
+            return Err("Lần đăng nhập này đã bị lần đăng nhập mới hơn thay thế.".to_string());
         }
-        _ => None,
+
+        if start_time.elapsed() > timeout {
+            let _ = window.close();
+            return Err("Hết thời gian chờ đăng nhập (timeout).".to_string());
+        }
+
+        // Check if the window is still alive before requesting cookies.
+        if app.get_webview_window(LOGIN_WINDOW_LABEL).is_none() {
+            // Window was closed by user before we got the cookie.
+            return Err("Cửa sổ đăng nhập đã bị đóng trước khi hoàn tất.".to_string());
+        }
+
+        // A cookie may have arrived since the previous tick.
+        if let Some(cookie) = probe.try_take() {
+            let _ = window.close();
+            break cookie;
+        }
+
+        // Ask the main thread to probe both hosts. The sender is retained inside `probe`, so a slow
+        // WebView2 callback still delivers on a later tick instead of being dropped.
+        if let Err(error) = request_cookie_on_main_thread(&app, LOGIN_WINDOW_LABEL, probe.sender())
+        {
+            return Err(format!("không gửi được yêu cầu đọc cookie: {error}"));
+        }
     };
 
-    let cookie = tauri::async_runtime::spawn_blocking(move || run_browser_login(&app, credentials))
-        .await
-        .map_err(|e| e.to_string())??;
+    emit_browser_progress(&app, "ready", 1.0, 1.0);
 
-    add_account_from_cookie(&state, &cookie, None)
+    // `add_account_from_cookie` performs blocking HTTP via `reqwest::blocking`, which owns a Tokio
+    // runtime. It must run on a blocking thread: dropping that runtime on an async worker panics.
+    add_account_from_cookie(
+        AccountWriter::from_state(&state),
+        cookie,
+        None,
+        saved_password,
+    )
+    .await
 }
 
 #[must_use]
@@ -1319,7 +1635,7 @@ pub fn run() {
     };
 
     let app_state = AppState {
-        store: Mutex::new(AccountStore::from_accounts(initial_accounts)),
+        store: Arc::new(Mutex::new(AccountStore::from_accounts(initial_accounts))),
         mutex_guard: Mutex::new(None),
         data_file,
         data_dir,
@@ -1327,6 +1643,7 @@ pub fn run() {
         limiter: Arc::new(RateLimiter::new(Duration::from_millis(
             HTTP_MIN_INTERVAL_MS,
         ))),
+        login_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
     tauri::Builder::default()
