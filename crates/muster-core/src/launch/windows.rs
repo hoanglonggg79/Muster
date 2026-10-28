@@ -488,9 +488,117 @@ pub fn list_running_clients() -> Vec<RunningClient> {
         .collect()
 }
 
+pub const MULTI_INSTANCE_ALREADY_HELD: &str =
+    "Roblox đang chạy nên chưa bật được Multi-Roblox — hãy đóng hết Roblox rồi bật lại";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiInstanceStatus {
+    Owned,
+    NotOwned,
+    ConflictWithRunningRoblox(u32),
+}
+
+pub struct MultiInstanceGuard {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    joined: Option<std::thread::JoinHandle<bool>>,
+}
+
+impl MultiInstanceGuard {
+    pub fn start() -> Self {
+        let (stop, receiver) = std::sync::mpsc::channel::<()>();
+        let (ready, ready_receiver) = std::sync::mpsc::channel::<bool>();
+
+        let joined = std::thread::Builder::new()
+            .name("roblox-singleton-mutex".to_owned())
+            .spawn(move || {
+                let acquired = match SingletonMutex::acquire() {
+                    Ok(mutex) if mutex.is_held() => Some(mutex),
+                    _ => None,
+                };
+                let owned = acquired.is_some();
+                let _ = ready.send(owned);
+
+                if let Some(mutex) = acquired {
+                    let _ = receiver.recv();
+                    drop(mutex);
+                }
+                owned
+            })
+            .ok();
+
+        let owned = joined.is_some() && ready_receiver.recv().unwrap_or(false);
+
+        if !owned {
+            if let Some(handle) = joined {
+                let _ = handle.join();
+            }
+            return Self {
+                stop: None,
+                joined: None,
+            };
+        }
+
+        Self {
+            stop: Some(stop),
+            joined,
+        }
+    }
+
+    #[must_use]
+    pub fn is_owned(&self) -> bool {
+        self.joined.is_some()
+    }
+}
+
+impl Drop for MultiInstanceGuard {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(handle) = self.joined.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl std::fmt::Debug for MultiInstanceGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiInstanceGuard")
+            .field("name", &SINGLETON_MUTEX_NAME)
+            .field("owned", &self.is_owned())
+            .finish()
+    }
+}
+
+#[must_use]
+pub fn multi_instance_status() -> MultiInstanceStatus {
+    match probe_singleton_mutex().acquire_attempt {
+        MutexOutcome::Acquired => MultiInstanceStatus::NotOwned,
+        MutexOutcome::HeldByAnotherProcess => {
+            let running = find_running_roblox_pids();
+            match running.first() {
+                Some(pid) => MultiInstanceStatus::ConflictWithRunningRoblox(*pid),
+                None => MultiInstanceStatus::ConflictWithRunningRoblox(0),
+            }
+        }
+        MutexOutcome::Failed(code) => {
+            tracing::warn!(code, "không dò được ROBLOX_singletonMutex");
+            MultiInstanceStatus::NotOwned
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static MUTEX_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn serialized() -> std::sync::MutexGuard<'static, ()> {
+        MUTEX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
 
     #[test]
     fn acquiring_gives_a_live_handle() {
@@ -514,14 +622,6 @@ mod tests {
             first.is_held(),
             "drop ban sao khong duoc lam mat quyen cua ban goc"
         );
-    }
-
-    static MUTEX_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn serialized() -> std::sync::MutexGuard<'static, ()> {
-        MUTEX_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     #[test]
@@ -563,6 +663,47 @@ mod tests {
 
         let again = SingletonMutex::acquire().expect("tao lai");
         assert!(again.is_held());
+    }
+
+    #[test]
+    fn the_guard_owns_the_mutex_from_its_own_thread_and_blocks_a_second_guard() {
+        let _serialized = serialized();
+        let guard = MultiInstanceGuard::start();
+        assert!(
+            guard.is_owned(),
+            "guard dau tien phai giu duoc mutex: {guard:?}"
+        );
+
+        let contender = std::thread::spawn(MultiInstanceGuard::start)
+            .join()
+            .expect("thread thu hai");
+        assert!(
+            !contender.is_owned(),
+            "guard thu hai trong cung tien trinh cung phai thay bi chiem"
+        );
+
+        drop(guard);
+
+        let after = std::thread::spawn(MultiInstanceGuard::start)
+            .join()
+            .expect("thread sau khi drop");
+        assert!(after.is_owned(), "drop guard phai nha mutex: {after:?}");
+    }
+
+    #[test]
+    fn the_guard_reports_a_conflict_while_another_guard_holds_the_mutex() {
+        let _serialized = serialized();
+        let guard = MultiInstanceGuard::start();
+        assert!(guard.is_owned());
+
+        let status = multi_instance_status();
+        assert!(
+            matches!(status, MultiInstanceStatus::ConflictWithRunningRoblox(_)),
+            "dang giu mutex thi status phai bao tranh chap: {status:?}"
+        );
+
+        drop(guard);
+        assert_eq!(multi_instance_status(), MultiInstanceStatus::NotOwned);
     }
 
     #[test]
