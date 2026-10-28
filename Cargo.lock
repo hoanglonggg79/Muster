@@ -2253,6 +2253,7 @@ dependencies = [
  "tauri-build",
  "tauri-specta",
  "tokio",
+ "tracing",
  "webview2-com",
  "windows-core 0.61.2",
 ]

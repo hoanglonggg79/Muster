@@ -101,7 +101,7 @@ impl Default for General {
             max_fps_value: 120,
             use_cef_sharp_browser: false,
             custom_client_settings: None,
-            enable_multi_rbx: false,
+            enable_multi_rbx: true,
             shuffle_job_id: false,
             other: Section::new(),
         }
@@ -630,8 +630,8 @@ Name=dark
         assert_eq!(d.general.max_fps_value, 120);
         assert!(!d.general.unlock_fps);
         assert!(
-            !d.general.enable_multi_rbx,
-            "multi-instance phai mac dinh TAT"
+            d.general.enable_multi_rbx,
+            "multi-instance phai mac dinh BAT: day la ung dung quan ly nhieu acc"
         );
 
         assert!(!d.developer.dev_mode, "DevMode phai mac dinh TAT");

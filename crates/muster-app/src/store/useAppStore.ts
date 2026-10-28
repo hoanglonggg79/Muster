@@ -257,8 +257,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().notify(
           res.data ? "Da kich hoat Multi-Roblox" : "Da tat Multi-Roblox"
         );
+      } else {
+        set({ multiRoblox: false });
+        get().notify(`Khong bat duoc Multi-Roblox: ${res.error}`);
       }
     } catch (e) {
+      set({ multiRoblox: false });
       get().notify(`Loi Multi-Roblox: ${String(e)}`);
     }
   },

@@ -6,10 +6,12 @@ use std::time::Duration;
 use muster_core::datetime::{now_local_json_net, now_unix_millis};
 use muster_core::import;
 use muster_core::launch::windows::{
-    SingletonMutex, SystemClientControl, launch_roblox_url, list_running_clients,
+    MULTI_INSTANCE_ALREADY_HELD, MultiInstanceGuard, MultiInstanceStatus, SystemClientControl,
+    launch_roblox_url, list_running_clients, multi_instance_status,
 };
 use muster_core::launch::{
-    LaunchTarget, build_launch_url, close_previous_instances, generate_browser_tracker_id,
+    CloseDecision, LaunchReadiness, LaunchTarget, build_launch_url, check_launch_readiness,
+    close_previous_instances, decide_close, generate_browser_tracker_id,
 };
 use muster_core::models::Account;
 use muster_core::patch::{
@@ -297,7 +299,7 @@ impl From<PinState> for PinInfo {
 
 pub struct AppState {
     pub store: Arc<Mutex<AccountStore>>,
-    pub mutex_guard: Mutex<Option<SingletonMutex>>,
+    pub mutex_guard: Mutex<Option<MultiInstanceGuard>>,
     pub data_file: PathBuf,
     pub data_dir: PathBuf,
     pub settings: Mutex<Settings>,
@@ -332,6 +334,50 @@ impl AppState {
         settings
             .save_json(&import::settings_json_path())
             .map_err(|e| e.to_string())
+    }
+
+    fn multi_roblox_enabled(&self) -> bool {
+        self.settings
+            .lock()
+            .map(|settings| settings.general.enable_multi_rbx)
+            .unwrap_or(false)
+    }
+
+    fn sync_multi_roblox(&self) -> MultiInstanceStatus {
+        let enabled = self.multi_roblox_enabled();
+        let mut guard = match self.mutex_guard.lock() {
+            Ok(guard) => guard,
+            Err(error) => {
+                tracing::error!(%error, "khoá trạng thái Multi-Roblox bị poison");
+                return MultiInstanceStatus::NotOwned;
+            }
+        };
+
+        if !enabled {
+            *guard = None;
+            return MultiInstanceStatus::NotOwned;
+        }
+
+        if guard.as_ref().is_some_and(MultiInstanceGuard::is_owned) {
+            return MultiInstanceStatus::Owned;
+        }
+
+        let fresh = MultiInstanceGuard::start();
+        if fresh.is_owned() {
+            *guard = Some(fresh);
+            MultiInstanceStatus::Owned
+        } else {
+            let status = multi_instance_status();
+            tracing::warn!(
+                ?status,
+                "không giữ được ROBLOX_singletonMutex — Multi-Roblox chưa bật"
+            );
+            status
+        }
+    }
+
+    fn multi_roblox_owned(&self) -> bool {
+        matches!(self.sync_multi_roblox(), MultiInstanceStatus::Owned)
     }
 }
 
@@ -639,13 +685,25 @@ fn account_launch(
         .auth_ticket_with_csrf(&cookie, &csrf)
         .map_err(|e| e.to_string())?;
 
-    if state
+    let multi_instance = state.multi_roblox_owned();
+
+    if check_launch_readiness(state.multi_roblox_enabled(), multi_instance)
+        == LaunchReadiness::MultiInstanceNotOwned
+    {
+        tracing::warn!(
+            user_id = uid,
+            "Multi-Roblox đang bật nhưng chưa giữ được mutex — acc thứ hai sẽ đóng acc thứ nhất"
+        );
+    }
+
+    let auto_close = state
         .settings
         .lock()
         .map_err(|e| e.to_string())?
         .general
-        .auto_close_last_process
-    {
+        .auto_close_last_process;
+
+    if decide_close(auto_close, multi_instance) == CloseDecision::CloseMatchingTracker {
         let clients = list_running_clients();
         let mut control = SystemClientControl;
         close_previous_instances(&mut control, &clients, &tracker);
@@ -663,6 +721,7 @@ fn account_launch(
 #[tauri::command]
 #[specta::specta]
 fn app_init_state(state: State<AppState>) -> Result<AppInitState, String> {
+    let multi_roblox = state.multi_roblox_owned();
     let settings = state.settings.lock().map_err(|e| e.to_string())?;
     Ok(AppInitState {
         unlock_fps: settings.general.unlock_fps,
@@ -671,7 +730,7 @@ fn app_init_state(state: State<AppState>) -> Result<AppInitState, String> {
         } else {
             DEFAULT_FPS_CAP
         },
-        multi_roblox: settings.general.enable_multi_rbx,
+        multi_roblox,
     })
 }
 
@@ -707,21 +766,23 @@ fn patch_apply_fps(
 #[tauri::command]
 #[specta::specta]
 fn multi_roblox_toggle(enabled: bool, state: State<AppState>) -> Result<bool, String> {
-    let mut guard = state.mutex_guard.lock().map_err(|e| e.to_string())?;
-    if enabled {
-        if guard.is_none() {
-            let m = SingletonMutex::acquire().map_err(|e| e.to_string())?;
-            *guard = Some(m);
-        }
-    } else {
-        *guard = None;
-    }
     {
         let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
         settings.general.enable_multi_rbx = enabled;
     }
+
+    let status = state.sync_multi_roblox();
     state.save_settings()?;
-    Ok(enabled)
+
+    match status {
+        MultiInstanceStatus::Owned => Ok(true),
+        MultiInstanceStatus::ConflictWithRunningRoblox(pid) => {
+            tracing::warn!(pid, "Roblox đang giữ ROBLOX_singletonMutex");
+            Err(format!("{MULTI_INSTANCE_ALREADY_HELD} (pid {pid})"))
+        }
+        MultiInstanceStatus::NotOwned if enabled => Err(MULTI_INSTANCE_ALREADY_HELD.to_owned()),
+        MultiInstanceStatus::NotOwned => Ok(false),
+    }
 }
 
 #[tauri::command]
@@ -1373,6 +1434,40 @@ fn recent_push(
 
 pub const LOGIN_WINDOW_LABEL: &str = "roblox-login";
 
+/// Build the main window explicitly.
+///
+/// `app.windows[].create` in `tauri.conf.json` is `false`, and Tauri's own `setup()` creates its
+/// windows *before* running the serde context, so a bad config could never be reported by us. Here
+/// the error is returned as a string and rendered by `run()` instead of triggering an opaque
+/// `panic!("Failed to setup app")` from inside Tauri.
+fn create_main_window(app: &tauri::App) -> Result<(), String> {
+    eprintln!("[muster] creating main window");
+
+    // Pin WebView2's user-data folder to %APPDATA%\dev.muster.app\WebView2 so it is
+    // always owned by the current user. Without this, a single admin run leaves the
+    // default %LOCALAPPDATA%\dev.muster.app folder owned by SYSTEM/Administrator,
+    // causing "Access is denied (os error 5)" on every subsequent non-elevated launch.
+    //
+    // %APPDATA% (Roaming) is always set on Windows and is always writable by the
+    // current user regardless of elevation level, so we do not need the `dirs` crate.
+    let webview_data_dir = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("dev.muster.app")
+        .join("WebView2");
+
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Muster")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(900.0, 600.0)
+        .resizable(true)
+        .disable_drag_drop_handler()
+        .data_directory(webview_data_dir)
+        .build()
+        .map(|_window| ())
+        .map_err(|error| format!("không tạo được cửa sổ chính: {error:?}"))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn browser_status() -> BrowserStatus {
@@ -1615,6 +1710,8 @@ pub fn run() {
     #[cfg(debug_assertions)]
     export_bindings().expect("không ghi được bindings TypeScript");
 
+    // Runs before Tauri exists, so a failure here is ours to report. Every step is non-fatal: a
+    // locked or unreadable data directory must not stop the window from opening.
     import::migrate_legacy_portable_data();
 
     let data_dir = import::ensure_app_data_dir();
@@ -1626,13 +1723,9 @@ pub fn run() {
         let _ = settings.save_json(&settings_path);
     }
 
-    let initial_accounts = if data_file.is_file() {
-        vault::read_accounts_from_path(&data_file, None)
-            .map(|(accs, _)| accs)
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let initial_accounts = vault::read_accounts_from_path(&data_file, None)
+        .map(|(accs, _)| accs)
+        .unwrap_or_default();
 
     let app_state = AppState {
         store: Arc::new(Mutex::new(AccountStore::from_accounts(initial_accounts))),
@@ -1646,11 +1739,26 @@ pub fn run() {
         login_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
 
+    let status = app_state.sync_multi_roblox();
+    match status {
+        MultiInstanceStatus::Owned => {
+            tracing::info!("Multi-Roblox: đã giữ ROBLOX_singletonMutex");
+        }
+        MultiInstanceStatus::ConflictWithRunningRoblox(pid) => {
+            tracing::warn!(
+                pid,
+                "Multi-Roblox: Roblox đang chạy nên chưa giữ được ROBLOX_singletonMutex"
+            );
+        }
+        MultiInstanceStatus::NotOwned => {}
+    }
+
     tauri::Builder::default()
         .manage(app_state)
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            create_main_window(app).map_err(std::io::Error::other)?;
             Ok(())
         })
         .run(tauri::generate_context!())
