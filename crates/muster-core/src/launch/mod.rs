@@ -277,6 +277,38 @@ pub fn close_previous_instances<C: ClientControl>(
     targets.len()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseDecision {
+    CloseMatchingTracker,
+
+    SkipBecauseMultiInstanceIsOn,
+}
+
+#[must_use]
+pub fn decide_close(auto_close_enabled: bool, multi_instance_enabled: bool) -> CloseDecision {
+    if auto_close_enabled && !multi_instance_enabled {
+        CloseDecision::CloseMatchingTracker
+    } else {
+        CloseDecision::SkipBecauseMultiInstanceIsOn
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchReadiness {
+    Ready,
+
+    MultiInstanceNotOwned,
+}
+
+#[must_use]
+pub fn check_launch_readiness(multi_instance_enabled: bool, mutex_owned: bool) -> LaunchReadiness {
+    if multi_instance_enabled && !mutex_owned {
+        LaunchReadiness::MultiInstanceNotOwned
+    } else {
+        LaunchReadiness::Ready
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,5 +716,39 @@ mod tests {
 
         assert_eq!(closed, 2);
         assert!(!control.actions.iter().any(|action| action.ends_with(":12")));
+    }
+
+    #[test]
+    fn auto_close_only_fires_when_multi_instance_is_off() {
+        assert_eq!(
+            decide_close(true, false),
+            CloseDecision::CloseMatchingTracker,
+            "RAM chi dong tien trinh cu khi multi tat hoac khong giu duoc mutex"
+        );
+        assert_eq!(
+            decide_close(true, true),
+            CloseDecision::SkipBecauseMultiInstanceIsOn,
+            "multi bat thi TUYET DOI khong duoc dong acc khac"
+        );
+        assert_eq!(
+            decide_close(false, false),
+            CloseDecision::SkipBecauseMultiInstanceIsOn,
+            "nguoi dung tat auto-close thi khong dong"
+        );
+        assert_eq!(
+            decide_close(false, true),
+            CloseDecision::SkipBecauseMultiInstanceIsOn
+        );
+    }
+
+    #[test]
+    fn enabling_multi_instance_without_owning_the_mutex_is_not_ready() {
+        assert_eq!(
+            check_launch_readiness(true, false),
+            LaunchReadiness::MultiInstanceNotOwned,
+            "bat multi ma khong giu mutex thi acc thu 2 se dong acc thu nhat"
+        );
+        assert_eq!(check_launch_readiness(true, true), LaunchReadiness::Ready);
+        assert_eq!(check_launch_readiness(false, false), LaunchReadiness::Ready);
     }
 }

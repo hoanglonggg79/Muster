@@ -10,6 +10,8 @@ type Hwnd = *mut c_void;
 unsafe extern "system" {
     fn CreateMutexW(attributes: *const c_void, initial_owner: i32, name: *const u16)
     -> *mut c_void;
+    fn WaitForSingleObject(handle: *mut c_void, millis: u32) -> u32;
+    fn ReleaseMutex(handle: *mut c_void) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
     fn GetLastError() -> u32;
     fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
@@ -84,18 +86,68 @@ struct ProcessBasicInformation {
     reserved3: *mut c_void,
 }
 
+const WAIT_OBJECT_0: u32 = 0x0000_0000;
+const WAIT_ABANDONED: u32 = 0x0000_0080;
+const WAIT_TIMEOUT: u32 = 0x0000_0102;
+
+fn wide_name() -> Vec<u16> {
+    SINGLETON_MUTEX_NAME
+        .encode_utf16()
+        .chain(core::iter::once(0))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutexOutcome {
+    Acquired,
+    HeldByAnotherProcess,
+    Failed(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutexProbe {
+    pub name: &'static str,
+    pub acquire_attempt: MutexOutcome,
+}
+
+#[must_use]
+pub fn probe_singleton_mutex() -> MutexProbe {
+    let name = wide_name();
+    let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
+
+    if handle.is_null() {
+        return MutexProbe {
+            name: SINGLETON_MUTEX_NAME,
+            acquire_attempt: MutexOutcome::Failed(unsafe { GetLastError() }),
+        };
+    }
+
+    let wait = unsafe { WaitForSingleObject(handle, 0) };
+    let outcome = match wait {
+        WAIT_OBJECT_0 | WAIT_ABANDONED => {
+            unsafe { ReleaseMutex(handle) };
+            MutexOutcome::Acquired
+        }
+        WAIT_TIMEOUT => MutexOutcome::HeldByAnotherProcess,
+        _ => MutexOutcome::Failed(unsafe { GetLastError() }),
+    };
+
+    unsafe { CloseHandle(handle) };
+
+    MutexProbe {
+        name: SINGLETON_MUTEX_NAME,
+        acquire_attempt: outcome,
+    }
+}
+
 pub struct SingletonMutex {
     handle: isize,
+    owns: bool,
 }
 
 impl SingletonMutex {
     pub fn acquire() -> Result<Self, LaunchError> {
-        let name: Vec<u16> = SINGLETON_MUTEX_NAME
-            .encode_utf16()
-            .chain(core::iter::once(0))
-            .collect();
-
-        let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
+        let handle = unsafe { CreateMutexW(ptr::null(), 0, wide_name().as_ptr()) };
 
         if handle.is_null() {
             let code = unsafe { GetLastError() };
@@ -105,14 +157,29 @@ impl SingletonMutex {
             });
         }
 
+        let wait = unsafe { WaitForSingleObject(handle, 0) };
+        let owns = match wait {
+            WAIT_OBJECT_0 | WAIT_ABANDONED => true,
+            WAIT_TIMEOUT => false,
+            _ => {
+                let code = unsafe { GetLastError() };
+                unsafe { CloseHandle(handle) };
+                return Err(LaunchError::Mutex {
+                    name: SINGLETON_MUTEX_NAME,
+                    code,
+                });
+            }
+        };
+
         Ok(Self {
             handle: handle as isize,
+            owns,
         })
     }
 
     #[must_use]
     pub fn is_held(&self) -> bool {
-        self.handle != 0
+        self.handle != 0 && self.owns
     }
 }
 
@@ -120,9 +187,13 @@ impl Drop for SingletonMutex {
     fn drop(&mut self) {
         if self.handle != 0 {
             unsafe {
+                if self.owns {
+                    ReleaseMutex(self.handle as *mut c_void);
+                }
                 CloseHandle(self.handle as *mut c_void);
             }
             self.handle = 0;
+            self.owns = false;
         }
     }
 }
@@ -423,19 +494,70 @@ mod tests {
 
     #[test]
     fn acquiring_gives_a_live_handle() {
+        let _guard = serialized();
         let mutex = SingletonMutex::acquire().expect("phai tao duoc mutex");
         assert!(mutex.is_held());
     }
 
     #[test]
     fn acquiring_twice_in_the_same_process_both_succeed() {
+        let _guard = serialized();
         let first = SingletonMutex::acquire().expect("lan 1");
+        assert!(first.is_held());
         let second = SingletonMutex::acquire().expect("lan 2");
-        assert!(first.is_held() && second.is_held());
+        assert!(
+            second.is_held(),
+            "Win32 mutex la reentrant trong cung thread, nen lan hai van phai giu duoc"
+        );
+        drop(second);
+        assert!(
+            first.is_held(),
+            "drop ban sao khong duoc lam mat quyen cua ban goc"
+        );
+    }
+
+    static MUTEX_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn serialized() -> std::sync::MutexGuard<'static, ()> {
+        MUTEX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    #[test]
+    fn the_probe_reports_the_mutex_free_when_nobody_holds_it() {
+        let _guard = serialized();
+        let probe = probe_singleton_mutex();
+        assert_eq!(probe.name, SINGLETON_MUTEX_NAME);
+        assert_eq!(
+            probe.acquire_attempt,
+            MutexOutcome::Acquired,
+            "khong ai giu mutex thi probe phai lanh: {probe:?}"
+        );
+    }
+
+    #[test]
+    fn the_probe_sees_our_own_hold_and_reports_it_as_held() {
+        let _guard = serialized();
+        let mutex = SingletonMutex::acquire().expect("giu mutex");
+        let probe = std::thread::spawn(probe_singleton_mutex)
+            .join()
+            .expect("thread probe");
+        assert_eq!(
+            probe.acquire_attempt,
+            MutexOutcome::HeldByAnotherProcess,
+            "win32 mutex giu theo THREAD, nen chi thread khac moi thay bi chiem: {probe:?}"
+        );
+        drop(mutex);
+        let after = std::thread::spawn(probe_singleton_mutex)
+            .join()
+            .expect("thread probe");
+        assert_eq!(after.acquire_attempt, MutexOutcome::Acquired);
     }
 
     #[test]
     fn dropping_releases_the_handle_and_is_idempotent_in_effect() {
+        let _guard = serialized();
         let mutex = SingletonMutex::acquire().expect("tao mutex");
         drop(mutex);
 
