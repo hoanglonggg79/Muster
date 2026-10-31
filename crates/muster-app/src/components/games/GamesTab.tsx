@@ -1,5 +1,5 @@
-import { Clock, Gamepad2, Play, RefreshCw, Server, Star } from "lucide-react";
-import { useEffect } from "react";
+import { Clock, Gamepad2, Play, RefreshCw, Search, Server, Star } from "lucide-react";
+import { useEffect, useState } from "react";
 import { PRESET_GAMES } from "../../lib/accountUtils";
 import { useAppStore } from "../../store/useAppStore";
 
@@ -25,6 +25,7 @@ export function GamesTab() {
   const refreshRecent = useAppStore((s) => s.refreshRecent);
   const pushRecent = useAppStore((s) => s.pushRecent);
   const toggleFavorite = useAppStore((s) => s.toggleFavorite);
+  const notify = useAppStore((s) => s.notify);
 
   const games = useAppStore((s) => s.games);
   const gameThumbnails = useAppStore((s) => s.gameThumbnails);
@@ -36,6 +37,35 @@ export function GamesTab() {
   const activeGame = games[numericPlaceId];
   const activeThumbnail = gameThumbnails[numericPlaceId];
   const activeGameName = activeGame?.name ?? `Place ${numericPlaceId}`;
+
+  const [gameSearch, setGameSearch] = useState("");
+  const searchLower = gameSearch.trim().toLowerCase();
+  const filteredPresets = PRESET_GAMES.filter((game) => {
+    if (!searchLower) return true;
+    return (
+      game.name.toLowerCase().includes(searchLower) ||
+      game.placeId.includes(searchLower)
+    );
+  });
+
+  function handleGameSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const q = gameSearch.trim();
+    if (!q) return;
+    const digits = q.replace(/[^0-9]/g, "");
+    if (digits && digits === q) {
+      setPlaceId(q);
+      refreshGames([Number(q)]);
+      return;
+    }
+    const match = PRESET_GAMES.find((game) => game.name.toLowerCase() === q);
+    if (match) {
+      setPlaceId(match.placeId);
+      refreshGames([Number(match.placeId)]);
+    } else {
+      notify(`Không tìm thấy game "${q}"`);
+    }
+  }
 
   useEffect(() => {
     refreshFavorites();
@@ -146,14 +176,32 @@ export function GamesTab() {
       )}
 
       <div style={{ marginTop: "6px" }}>
+        <form onSubmit={handleGameSearchSubmit} style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <input
+            id="games-search"
+            className="input-field"
+            value={gameSearch}
+            onChange={(e) => setGameSearch(e.target.value)}
+            placeholder="Tên game hoặc Place ID (vd. Blox Fruits / 4483381587)"
+            style={{ flex: 1 }}
+          />
+          <button type="submit" className="btn btn-primary btn-sm">
+            <Search size={13} fill="currentColor" />
+          </button>
+        </form>
         <span className="input-label" style={{ marginBottom: "8px", display: "block" }}>
           Quick Bookmarks
         </span>
         <div className="game-bookmarks">
-          {PRESET_GAMES.map((game) => (
+          {filteredPresets.map((game) => (
             gameChip(game.name, game.placeId, placeId === game.placeId)
           ))}
         </div>
+        {searchLower && filteredPresets.length === 0 && (
+          <p style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+            Không có game nào khớp
+          </p>
+        )}
       </div>
 
       {favorites.length > 0 && (

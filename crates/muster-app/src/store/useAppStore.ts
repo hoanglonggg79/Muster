@@ -655,7 +655,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (thumbRes.status === "ok") {
         const nextThumb: Record<number, string> = { ...get().gameThumbnails };
         for (const thumb of thumbRes.data) {
-          if (thumb.asset_id != null) nextThumb[thumb.asset_id] = thumb.url;
+          if (
+            thumb.asset_id != null &&
+            thumb.url &&
+            thumb.url !== "UNK" &&
+            /^https?:\/\//i.test(thumb.url)
+          ) {
+            nextThumb[thumb.asset_id] = thumb.url;
+          }
         }
         set({ gameThumbnails: nextThumb });
       }
