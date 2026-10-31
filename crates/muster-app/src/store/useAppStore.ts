@@ -6,6 +6,7 @@ import type {
   BrowserProgress,
   BrowserStatus,
   FavoriteGame_Serialize,
+  GameDetails,
   GroupInfo,
   RecentGame_Serialize,
   ServerInfo_Serialize,
@@ -53,6 +54,9 @@ interface AppState {
   serversLoading: boolean;
   favorites: FavoriteGame_Serialize[];
   recent: RecentGame_Serialize[];
+  games: Record<number, GameDetails>;
+  gameThumbnails: Record<number, string>;
+  gamesLoading: boolean;
   browser: BrowserStatus | null;
   browserProgress: BrowserProgress | null;
   browserBusy: boolean;
@@ -99,6 +103,7 @@ interface AppState {
   toggleFavorite: (name: string, placeId: number) => Promise<void>;
   refreshRecent: () => Promise<void>;
   pushRecent: (name: string, placeId: number) => Promise<void>;
+  refreshGames: (placeIds: number[]) => Promise<void>;
   refreshBrowser: () => Promise<void>;
   downloadChromium: () => Promise<boolean>;
   openBrowserLogin: (
@@ -134,6 +139,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   serversLoading: false,
   favorites: [],
   recent: [],
+  games: {},
+  gameThumbnails: {},
+  gamesLoading: false,
   browser: null,
   browserProgress: null,
   browserBusy: false,
@@ -622,6 +630,42 @@ export const useAppStore = create<AppState>((set, get) => ({
       /* danh sach gan day khong quan trong bang viec khoi chay */
     }
   },
+
+  refreshGames: async (placeIds) => {
+    const valid = placeIds.filter((id) => id != null && !Number.isNaN(id));
+    if (valid.length === 0) return;
+    set({ gamesLoading: true });
+    try {
+      const detailsRes = await commands.gameDetails(valid, null);
+      if (detailsRes.status === "ok") {
+        const next: Record<number, GameDetails> = { ...get().games };
+        for (const game of detailsRes.data) {
+          if (game.placeId != null) next[game.placeId] = game;
+        }
+        set({ games: next });
+      }
+      const thumbRes = await commands.thumbnailsBatch(
+        valid.map((id) => ({
+          asset_id: id,
+          kind: "GameIcon",
+          size: "150x150",
+          format: null,
+        }))
+      );
+      if (thumbRes.status === "ok") {
+        const nextThumb: Record<number, string> = { ...get().gameThumbnails };
+        for (const thumb of thumbRes.data) {
+          if (thumb.asset_id != null) nextThumb[thumb.asset_id] = thumb.url;
+        }
+        set({ gameThumbnails: nextThumb });
+      }
+    } catch {
+      /* dữ liệu trò chơi chỉ là enhancement, không chặn khiển.launch */
+    } finally {
+      set({ gamesLoading: false });
+    }
+  },
+
 
   refreshBrowser: async () => {
     try {

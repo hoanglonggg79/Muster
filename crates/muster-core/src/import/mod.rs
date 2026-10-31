@@ -546,7 +546,7 @@ mod tests {
 
         let install = discover(&dir);
         let Ok(imported) = read_accounts(&install, None) else {
-            eprintln!("bỏ qua: máy này không giải mã được fixture DPAPI");
+            tracing::debug!("bỏ qua: máy này không giải mã được fixture DPAPI");
             let _ = std::fs::remove_dir_all(&dir);
             return;
         };

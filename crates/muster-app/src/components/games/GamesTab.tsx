@@ -26,26 +26,62 @@ export function GamesTab() {
   const pushRecent = useAppStore((s) => s.pushRecent);
   const toggleFavorite = useAppStore((s) => s.toggleFavorite);
 
+  const games = useAppStore((s) => s.games);
+  const gameThumbnails = useAppStore((s) => s.gameThumbnails);
+  const refreshGames = useAppStore((s) => s.refreshGames);
+
   const activeUserId = selectedUserId ?? accounts[0]?.UserID ?? null;
   const numericPlaceId = Number(placeId.replace(/[^0-9]/g, ""));
   const isFavorite = favorites.some((item) => item.placeId === numericPlaceId);
+  const activeGame = games[numericPlaceId];
+  const activeThumbnail = gameThumbnails[numericPlaceId];
+  const activeGameName = activeGame?.name ?? `Place ${numericPlaceId}`;
 
   useEffect(() => {
     refreshFavorites();
     refreshRecent();
-  }, [refreshFavorites, refreshRecent]);
+    refreshGames(PRESET_GAMES.map((game) => Number(game.placeId)));
+  }, [refreshFavorites, refreshRecent, refreshGames]);
 
   async function launchActive() {
     if (!activeUserId) return;
     const ok = await launchAccount(activeUserId);
     if (ok && numericPlaceId) {
       const known =
+        games[numericPlaceId]?.name ??
         PRESET_GAMES.find((game) => game.placeId === placeId)?.name ??
         favorites.find((item) => item.placeId === numericPlaceId)?.name ??
         recent.find((item) => item.placeId === numericPlaceId)?.name ??
         `Place ${numericPlaceId}`;
       await pushRecent(known, numericPlaceId);
     }
+  }
+
+  function gameChip(name: string, placeIdValue: string, active: boolean) {
+    const pid = Number(placeIdValue.replace(/[^0-9]/g, ""));
+    const game = games[pid];
+    const thumbnail = gameThumbnails[pid];
+    const resolvedName = game?.name ?? name;
+    return (
+      <button
+        key={placeIdValue}
+        type="button"
+        className={`game-bookmark-chip ${active ? "active" : ""}`}
+        onClick={() => setPlaceId(placeIdValue)}
+      >
+        {thumbnail ? (
+          <img
+            className="bookmark-thumb"
+            src={thumbnail}
+            alt={resolvedName}
+            loading="lazy"
+            decoding="async"
+          />
+        ) : null}
+        <span className="bookmark-title">{resolvedName}</span>
+        <span className="bookmark-id">{placeIdValue}</span>
+      </button>
+    );
   }
 
   return (
@@ -66,6 +102,10 @@ export function GamesTab() {
             type="text"
             value={placeId}
             onChange={(e) => setPlaceId(e.target.value)}
+            onBlur={() => {
+              const pid = Number(placeId.replace(/[^0-9]/g, ""));
+              if (pid && !Number.isNaN(pid)) refreshGames([pid]);
+            }}
             placeholder="e.g. 4483381587"
           />
         </div>
@@ -84,21 +124,34 @@ export function GamesTab() {
         </div>
       </div>
 
+      {numericPlaceId && (
+        <div className="game-bookmarks" style={{ gridTemplateColumns: "1fr", gap: 0, marginBottom: 8 }}>
+          <div className="game-bookmark-chip" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: "10px 12px" }}>
+            {activeThumbnail ? (
+              <img
+                className="bookmark-thumb"
+                src={activeThumbnail}
+                alt={activeGameName}
+                style={{ width: 56, height: 56, marginRight: 10, flexShrink: 0 }}
+                loading="lazy"
+                decoding="async"
+              />
+            ) : null}
+            <div>
+              <span className="bookmark-title" style={{ display: "block", fontSize: 13 }}>{activeGameName}</span>
+              <span className="bookmark-id" style={{ display: "block", fontSize: 11 }}>{numericPlaceId}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ marginTop: "6px" }}>
         <span className="input-label" style={{ marginBottom: "8px", display: "block" }}>
           Quick Bookmarks
         </span>
         <div className="game-bookmarks">
           {PRESET_GAMES.map((game) => (
-            <button
-              key={game.placeId}
-              type="button"
-              className={`game-bookmark-chip ${placeId === game.placeId ? "active" : ""}`}
-              onClick={() => setPlaceId(game.placeId)}
-            >
-              <span className="bookmark-title">{game.name}</span>
-              <span className="bookmark-id">{game.placeId}</span>
-            </button>
+            gameChip(game.name, game.placeId, placeId === game.placeId)
           ))}
         </div>
       </div>
