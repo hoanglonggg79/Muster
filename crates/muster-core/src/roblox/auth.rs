@@ -5,6 +5,7 @@ use super::http::{HttpMethod, HttpRequest, HttpResponse, Transport, TransportErr
 pub const BROWSER_REFERER: &str = "https://www.roblox.com/games/4924922222/Brookhaven-RP";
 
 pub const SECURITY_COOKIE: &str = ".ROBLOSECURITY";
+pub const TICKET_CONTENT_TYPE: &str = "application/x-www-form-urlencoded";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoints {
@@ -36,6 +37,12 @@ pub enum AuthError {
 
     #[error("Roblox không trả về header rbx-authentication-ticket (HTTP {status})")]
     MissingTicket { status: u16 },
+
+    #[error("lấy CSRF token thất bại: HTTP {status} — {message}")]
+    CsrfRequestFailed { status: u16, message: String },
+
+    #[error("lấy authentication ticket thất bại: HTTP {status} — {message}")]
+    TicketRequestFailed { status: u16, message: String },
 
     #[error("sai tên đăng nhập hoặc mật khẩu")]
     InvalidCredentials,
@@ -82,6 +89,15 @@ impl<T: Transport> AuthClient<T> {
         if response.status == 401 {
             return Err(AuthError::Unauthorized);
         }
+        if response.status == 429 {
+            return Err(rate_limited(&response));
+        }
+        if response.status != 403 {
+            return Err(AuthError::CsrfRequestFailed {
+                status: response.status,
+                message: failure_message(&response),
+            });
+        }
         extract_csrf_token(&response)
     }
 
@@ -98,6 +114,19 @@ impl<T: Transport> AuthClient<T> {
         let response = self
             .transport
             .execute(&self.ticket_request(cookie, Some(csrf)))?;
+
+        if response.status == 401 {
+            return Err(AuthError::Unauthorized);
+        }
+        if response.status == 429 {
+            return Err(rate_limited(&response));
+        }
+        if !(200..300).contains(&response.status) {
+            return Err(AuthError::TicketRequestFailed {
+                status: response.status,
+                message: failure_message(&response),
+            });
+        }
 
         response
             .header("rbx-authentication-ticket")
@@ -144,7 +173,9 @@ impl<T: Transport> AuthClient<T> {
             HttpMethod::Post,
             join(&self.endpoints.auth, "v1/authentication-ticket/"),
         )
-        .with_header("Referer", BROWSER_REFERER);
+        .with_header("Content-Type", TICKET_CONTENT_TYPE)
+        .with_header("Referer", BROWSER_REFERER)
+        .with_body(Vec::new());
 
         if !cookie.is_empty() {
             request = request.with_header("Cookie", format!("{SECURITY_COOKIE}={cookie}"));
@@ -217,14 +248,33 @@ pub fn roblosecurity_from_set_cookie(headers: &[(String, String)]) -> Option<Str
     None
 }
 
+fn rate_limited(response: &HttpResponse) -> AuthError {
+    AuthError::RateLimited {
+        retry_after_seconds: response
+            .header("retry-after")
+            .and_then(|value| value.trim().parse().ok()),
+    }
+}
+
+fn failure_message(response: &HttpResponse) -> String {
+    let raw = first_error_message(response.body_as_str().unwrap_or(""))
+        .unwrap_or_else(|| response.body_as_str().unwrap_or("").trim().to_owned());
+    let message = raw.trim();
+    if message.is_empty() {
+        return NO_MESSAGE.to_owned();
+    }
+
+    let mut shortened: String = message.chars().take(512).collect();
+    if message.chars().count() > 512 {
+        shortened.push('…');
+    }
+    shortened
+}
+
 #[must_use]
 pub fn classify_login_failure(response: &HttpResponse) -> AuthError {
     if response.status == 429 {
-        return AuthError::RateLimited {
-            retry_after_seconds: response
-                .header("retry-after")
-                .and_then(|value| value.trim().parse().ok()),
-        };
+        return rate_limited(response);
     }
 
     let challenge_id = response.header("rblx-challenge-id").map(str::to_owned);
@@ -370,14 +420,35 @@ mod tests {
             Some(".ROBLOSECURITY=COOKIE-X")
         );
         assert_eq!(requests[0].header("referer"), Some(BROWSER_REFERER));
+        assert_eq!(
+            requests[0].header("content-type"),
+            Some(TICKET_CONTENT_TYPE)
+        );
+        assert_eq!(requests[0].body.as_deref(), Some([].as_slice()));
     }
 
     #[test]
     fn a_missing_csrf_token_is_reported_with_its_status() {
-        let script = Scripted::new(vec![HttpResponse::new(200)]);
+        let script = Scripted::new(vec![HttpResponse::new(403)]);
         let error = client(&script).csrf_token("COOKIE").expect_err("phải lỗi");
 
-        assert_eq!(error, AuthError::MissingCsrfToken { status: 200 });
+        assert_eq!(error, AuthError::MissingCsrfToken { status: 403 });
+    }
+
+    #[test]
+    fn an_unexpected_csrf_status_is_not_misreported_as_a_missing_header() {
+        let script = Scripted::new(vec![
+            HttpResponse::new(415).with_body("Unsupported Media Type"),
+        ]);
+        let error = client(&script).csrf_token("COOKIE").expect_err("phải lỗi");
+
+        assert_eq!(
+            error,
+            AuthError::CsrfRequestFailed {
+                status: 415,
+                message: "Unsupported Media Type".to_owned()
+            }
+        );
     }
 
     #[test]
@@ -422,6 +493,10 @@ mod tests {
         let requests = script.requests();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[1].header("x-csrf-token"), Some("TOKEN-1"));
+        for request in &requests {
+            assert_eq!(request.header("content-type"), Some(TICKET_CONTENT_TYPE));
+            assert_eq!(request.body.as_deref(), Some([].as_slice()));
+        }
     }
 
     #[test]
@@ -433,6 +508,33 @@ mod tests {
 
         let error = client(&script).auth_ticket("COOKIE").expect_err("phải lỗi");
         assert_eq!(error, AuthError::MissingTicket { status: 200 });
+    }
+
+    #[test]
+    fn a_ticket_http_failure_is_not_misreported_as_a_missing_ticket() {
+        let script = Scripted::new(vec![
+            HttpResponse::new(403).with_header("x-csrf-token", "TOKEN-1"),
+            HttpResponse::new(415).with_body("Unsupported Media Type"),
+        ]);
+
+        let error = client(&script).auth_ticket("COOKIE").expect_err("phải lỗi");
+        assert_eq!(
+            error,
+            AuthError::TicketRequestFailed {
+                status: 415,
+                message: "Unsupported Media Type".to_owned()
+            }
+        );
+        assert!(!error.to_string().contains("không trả về header"));
+    }
+
+    #[test]
+    fn a_401_on_the_ticket_fetch_means_the_cookie_is_dead() {
+        let script = Scripted::new(vec![HttpResponse::new(401)]);
+        let error = client(&script)
+            .auth_ticket_with_csrf("COOKIE", "TOKEN")
+            .expect_err("phải lỗi");
+        assert_eq!(error, AuthError::Unauthorized);
     }
 
     #[test]

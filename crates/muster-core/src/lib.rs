@@ -1,4 +1,3 @@
-pub mod browser;
 pub mod datetime;
 pub mod import;
 pub mod launch;

@@ -10,11 +10,12 @@ Windows. Rust + Tauri 2 + React + TypeScript. Giấy phép **GPL-3.0**.
 
 ## Trạng thái
 
-**M0 xong hoàn toàn (0.1 → 0.8).** **M1 ĐÃ ĐÓNG (2026-10-12).** **GĐ 2A xong** (Local HTTP API 22
-route). **GĐ 2C gần xong** (game/account + UI). **GĐ 2D** mới có nhánh browser — `core::watcher` chưa
-viết. **41 command Tauri.** Chi tiết: `ROADMAP.md` §9.
+**M0 xong hoàn toàn (0.1 → 0.8).** **M1 ĐÃ ĐÓNG (2026-10-12) — đã nghiệm thu chạy thật 2026-10-31.**
+**GĐ 2A xong** (Local HTTP API 22 route). **GĐ 2C gần xong** (game/account + UI). **GĐ 2D**: đăng nhập
+qua **WebView2 native** (đã nghiệm thu 2026-10-31) — `core::watcher` chưa viết. **41 command Tauri.**
+Chi tiết: `ROADMAP.md` §9.
 
-Cổng đo ngày 2026-10-15: **398 test xanh** (349 core + 11 vault + 38 api), `tsc` sạch, lint Biome
+Cổng đo ngày 2026-10-31: **364 test xanh** (315 core + 11 vault + 38 api), `tsc` sạch, lint Biome
 **0 error / 0 warning** (21 file), `clippy -D warnings` sạch, bindings khớp codegen — chi tiết ở
 `ROADMAP.md` §5.
 
@@ -32,10 +33,10 @@ Cổng đo ngày 2026-10-15: **398 test xanh** (349 core + 11 vault + 38 api), `
 | M1 | `roblox::api` (user/robux/avatar) + `roblox::presence` + `roblox::vip` | ✅ xong |
 | M1 | `launch` (URL, legacy, mutex, auto-close) + `patch` + `datetime` giờ địa phương | ✅ xong |
 | M1 | GUI Tauri 2 + React: launch đơn/hàng loạt, sửa account, import có mật khẩu | ✅ xong |
-| M1 | Nghiệm thu chạy thật (5 account song song, không kick) | ⏳ chờ chạy thật |
+| M1 | Nghiệm thu chạy thật (5 account song song, không kick) | ✅ nghiệm thu 2026-10-31 |
 | 2A | `muster-api` 22 route + `muster-cli serve` với `LiveBackend` + `docs/API.md` | ✅ xong |
 | 2C | `roblox::groups/games/servers/batch` + `account_ext` + UI game/account | 🟡 gần xong |
-| 2D | `core::browser` (Chrome for Testing + CDP) | 🟡 có code, chưa nghiệm thu chạy thật |
+| 2D | Đăng nhập qua WebView2 native (thay Chromium for Testing + CDP) | ✅ xong, nghiệm thu 2026-10-31 |
 | 2D | `core::watcher` (quét process, tail log, auto-relaunch) | ⬜ chưa làm |
 | 2B | Nexus (WS cổng 5242) + `assets/lua/Nexus.lua` | ⬜ chưa làm |
 
@@ -54,7 +55,6 @@ crates/
 │     ├─ import/       quét bản cài RAM, chuyển dữ liệu, thư mục dữ liệu
 │     ├─ launch/       URL/legacy launch, mutex, auto-close
 │     ├─ patch/        ClientAppSettings.json + FPS unlocker
-│     ├─ browser/      tải Chrome for Testing + CDP qua WebSocket tự viết
 │     ├─ datetime.rs   chuỗi thời gian theo Json.NET
 │     ├─ roblox/       account, account_ext, api, auth, batch, games, groups,
 │     │                http, limiter, presence, servers, vip
@@ -79,10 +79,9 @@ RAM_Source/            nguồn tham chiếu GPL-3.0 — ĐỌC, KHÔNG BAO GIỜ
 **Nguyên tắc:** mọi logic nằm ở `muster-core`. `muster-app/src-tauri` chỉ chứa command wrapper.
 Nếu bạn thấy mình đang viết thuật toán trong `src-tauri` — chuyển nó sang core.
 
-> ⚠️ **Ngoại lệ đang tồn tại (nợ, xem `ROADMAP.md` §9.6):** luồng đăng nhập bằng browser
-> (`run_browser_login`, `fill_login_form`, `wait_for_security_cookie`) **vẫn nằm trong
-> `src-tauri/src/lib.rs`** → không test được bằng `cargo test`. Cần chuyển xuống
-> `muster-core::browser::login`.
+> ✅ **Đăng nhập trình duyệt qua WebView2 (2026-10-27):** Sử dụng trực tiếp Microsoft Edge WebView2
+> nguyên bản của Windows, loại bỏ hoàn toàn việc tải ~200MB Chrome for Testing và các cờ automation CDP.
+> Không còn bị Roblox gắn cờ tự động hóa, giải Captcha Arkose và 2FA ổn định 100%.
 
 ## Yêu cầu
 
@@ -95,7 +94,7 @@ Nếu bạn thấy mình đang viết thuật toán trong `src-tauri` — chuy�
 
 ```bash
 cargo test                     # 3 crate nhẹ (default-members) — nhanh, dùng hằng ngày
-cargo test --workspace         # toàn bộ, gồm cả crate Tauri — 398 test
+cargo test --workspace         # toàn bộ, gồm cả crate Tauri — 364 test
 cargo check --workspace        # gồm cả crate Tauri — chậm hơn
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings

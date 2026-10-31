@@ -1441,8 +1441,6 @@ pub const LOGIN_WINDOW_LABEL: &str = "roblox-login";
 /// the error is returned as a string and rendered by `run()` instead of triggering an opaque
 /// `panic!("Failed to setup app")` from inside Tauri.
 fn create_main_window(app: &tauri::App) -> Result<(), String> {
-    eprintln!("[muster] creating main window");
-
     // Pin WebView2's user-data folder to %APPDATA%\dev.muster.app\WebView2 so it is
     // always owned by the current user. Without this, a single admin run leaves the
     // default %LOCALAPPDATA%\dev.muster.app folder owned by SYSTEM/Administrator,

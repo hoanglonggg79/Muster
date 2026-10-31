@@ -741,11 +741,5 @@ mod tests {
         assert!(path.ends_with(ACCOUNT_FILE));
         assert_eq!(path.parent(), Some(app_data_dir().as_path()));
         assert_eq!(settings_json_path().parent(), path.parent());
-        assert_eq!(
-            crate::browser::detect::chrome_for_testing_root(&app_data_dir())
-                .parent()
-                .and_then(Path::parent),
-            path.parent()
-        );
     }
 }

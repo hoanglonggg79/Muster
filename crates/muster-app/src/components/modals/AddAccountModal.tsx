@@ -1,10 +1,10 @@
 import {
   Cookie,
-  Download,
   FileText,
   Globe,
   KeyRound,
   Loader2,
+  ShieldCheck,
   Users,
   X,
 } from "lucide-react";
@@ -22,30 +22,6 @@ interface LineResult {
   msg?: string;
 }
 
-function phaseLabel(phase: string): string {
-  switch (phase) {
-    case "connecting":
-      return "Đang kết nối tới máy chủ Chrome for Testing...";
-    case "downloading":
-      return "Đang tải Chromium, chờ xíu...";
-    case "extracting":
-      return "Đang giải nén Chromium...";
-    case "granting":
-      return "Đang cấp quyền sandbox cho Chromium...";
-    case "ready":
-      return "Chromium đã sẵn sàng!";
-    case "launching":
-      return "Đang mở trình duyệt...";
-    case "filling-form":
-      return "Đang tự điền tài khoản...";
-    case "waiting-login":
-      return "Đang chờ bạn đăng nhập trong cửa sổ trình duyệt...";
-    case "manual-login":
-      return "Không tự điền được — hãy đăng nhập thủ công trong cửa sổ trình duyệt.";
-    default:
-      return "Đang xử lý...";
-  }
-}
 
 function readDroppedFile(event: DragEvent<HTMLElement>, apply: (text: string) => void) {
   event.preventDefault();
@@ -138,11 +114,8 @@ export function AddAccountModal() {
   const refreshGroups = useAppStore((s) => s.refreshGroups);
   const notify = useAppStore((s) => s.notify);
 
-  const browser = useAppStore((s) => s.browser);
-  const browserProgress = useAppStore((s) => s.browserProgress);
   const browserBusy = useAppStore((s) => s.browserBusy);
   const refreshBrowser = useAppStore((s) => s.refreshBrowser);
-  const downloadChromium = useAppStore((s) => s.downloadChromium);
   const openBrowserLogin = useAppStore((s) => s.openBrowserLogin);
 
   const [addTab, setAddTab] = useState<AddTab>("cookie");
@@ -165,7 +138,6 @@ export function AddAccountModal() {
   if (!showAddModal) return null;
 
   const isBusy = submitting || tkpassProcessing || browserBusy;
-  const downloading = browserProgress !== null;
 
   function handleClose() {
     if (!isBusy) {
@@ -339,58 +311,6 @@ export function AddAccountModal() {
 
   return (
     <div className="modal-overlay">
-      {downloading && browserProgress && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.85)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "20px",
-          }}
-        >
-          <Loader2
-            size={40}
-            strokeWidth={1.5}
-            style={{ color: "var(--accent)", animation: "spin 1s linear infinite" }}
-          />
-          <div style={{ color: "var(--text-primary)", fontSize: "16px", fontWeight: 600 }}>
-            {phaseLabel(browserProgress.phase)}
-          </div>
-          <div
-            style={{
-              width: "320px",
-              height: "6px",
-              background: "var(--bg-tertiary)",
-              borderRadius: "999px",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${browserProgress.percent}%`,
-                background: "var(--accent)",
-                borderRadius: "999px",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <div style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-            {browserProgress.total > 0
-              ? `${Math.round(browserProgress.percent)}% — ${(
-                  browserProgress.downloaded /
-                  1024 /
-                  1024
-                ).toFixed(1)} / ${(browserProgress.total / 1024 / 1024).toFixed(1)} MB`
-              : "Vui lòng chờ..."}
-          </div>
-        </div>
-      )}
 
       <button
         type="button"
@@ -509,50 +429,50 @@ export function AddAccountModal() {
         )}
 
         {addTab === "browser" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             <div
               style={{
                 background: "var(--bg-tertiary)",
                 borderRadius: "8px",
-                padding: "14px 16px",
+                padding: "12px 14px",
                 fontSize: "13px",
                 color: "var(--text-secondary)",
                 lineHeight: 1.6,
+                display: "flex",
+                gap: "10px",
+                alignItems: "flex-start",
               }}
             >
-              Mở trình duyệt Chromium do Muster tự tải về để đăng nhập thủ công vào{" "}
-              <strong style={{ color: "var(--text-primary)" }}>roblox.com/login</strong>. Sau khi bạn
-              đăng nhập xong, Muster tự đọc cookie từ phiên trình duyệt và lưu tài khoản.
-            </div>
-
-            <div style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.7 }}>
+              <ShieldCheck size={18} strokeWidth={1.75} style={{ color: "#4ade80", flexShrink: 0, marginTop: "2px" }} />
               <div>
-                Chromium riêng của Muster:{" "}
-                <strong
-                  style={{ color: browser?.chrome_for_testing ? "#4ade80" : "var(--text-muted)" }}
-                >
-                  {browser?.chrome_for_testing_version ?? "chưa tải"}
-                </strong>
-              </div>
-              <div style={{ marginTop: "2px" }}>
-                Muster không dùng Chrome/Edge đang có trên máy để tránh xung đột phiên đăng nhập.
+                Đăng nhập qua <strong>Microsoft Edge WebView2</strong> (trình duyệt hệ thống Windows).
+                Phương thức này mang fingerprint tự nhiên của máy, <strong>không bị Roblox gắn cờ tự động hoá</strong>,
+                giải captcha Arkose và xác thực 2FA mượt mà không bị lặp.
               </div>
             </div>
 
-            {!browser?.ready && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => downloadChromium()}
-                disabled={browserBusy}
-                style={{ alignSelf: "flex-start" }}
-              >
-                <Download size={14} strokeWidth={1.75} />
-                Tải Chromium về (~200 MB)
-              </button>
-            )}
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", lineHeight: 1.5 }}>
+              * Sau khi đăng nhập thành công trong cửa sổ vừa mở, Muster sẽ tự động phát hiện cookie .ROBLOSECURITY, lưu tài khoản và đóng cửa sổ.
+            </div>
 
-            {browser?.ready && (
+            {browserBusy ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 14px",
+                  background: "var(--bg-surface)",
+                  borderRadius: "8px",
+                  color: "var(--accent-text)",
+                  fontSize: "13px",
+                  border: "1px solid var(--accent)",
+                }}
+              >
+                <Loader2 size={16} strokeWidth={1.75} style={{ animation: "spin 1s linear infinite" }} />
+                <span>Cửa sổ đăng nhập Roblox đang mở. Hãy đăng nhập và giải Captcha (nếu có)...</span>
+              </div>
+            ) : (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -561,26 +481,11 @@ export function AddAccountModal() {
                   if (ok) handleClose();
                 }}
                 disabled={browserBusy}
-                style={{ alignSelf: "flex-start" }}
+                style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: "6px" }}
               >
-                <Globe size={14} strokeWidth={1.75} />
-                Mở trang đăng nhập Roblox
+                <Globe size={15} strokeWidth={1.75} />
+                Mở trang đăng nhập Roblox (WebView2)
               </button>
-            )}
-
-            {browserBusy && !downloading && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  color: "var(--accent-text)",
-                  fontSize: "13px",
-                }}
-              >
-                <Loader2 size={14} strokeWidth={1.75} style={{ animation: "spin 1s linear infinite" }} />
-                Đang mở trình duyệt và chờ bạn đăng nhập...
-              </div>
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -638,14 +543,14 @@ export function AddAccountModal() {
                 onClick={() => setTkpassMode("browser")}
                 disabled={tkpassProcessing}
               >
-                Trình duyệt (tự điền)
+                Trình duyệt (WebView2)
               </button>
             </div>
 
             <div style={{ fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.6 }}>
               {tkpassMode === "api"
-                ? "Đăng nhập thẳng qua auth.roblox.com — nhanh, không cần trình duyệt, nhưng dễ bị captcha khi làm nhiều tài khoản liên tiếp."
-                : "Mở Chromium và tự điền username/password vào form đăng nhập. Chậm hơn nhưng vượt captcha tốt hơn. Cần tải Chromium trước."}
+                ? "Đăng nhập trực tiếp qua auth.roblox.com — cực nhanh, không cần mở trình duyệt. Nếu gặp captcha/2FA, chuyển sang chế độ Trình duyệt."
+                : "Mở cửa sổ WebView2 tự điền username/password lần lượt cho từng tài khoản. Giải captcha và 2FA an toàn không bị loop."}
             </div>
 
             {tkpassResults.length === 0 ? (
