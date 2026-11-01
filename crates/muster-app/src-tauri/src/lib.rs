@@ -381,10 +381,22 @@ impl AppState {
     }
 }
 
-fn http_transport(state: &AppState) -> Result<RetryTransport<ReqwestTransport>, String> {
+fn limited_transport(
+    limiter: &Arc<RateLimiter>,
+) -> Result<RetryTransport<ReqwestTransport>, String> {
     ReqwestTransport::new()
-        .map(|transport| RetryTransport::new(transport).with_limiter(Arc::clone(&state.limiter)))
+        .map(|transport| RetryTransport::new(transport).with_limiter(Arc::clone(limiter)))
         .map_err(|error| error.to_string())
+}
+
+async fn run_blocking<T, F>(job: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(job)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn resolve_launch_target<T: muster_core::roblox::http::Transport>(
@@ -475,9 +487,7 @@ impl AccountWriter {
     }
 
     fn http_transport(&self) -> Result<RetryTransport<ReqwestTransport>, String> {
-        ReqwestTransport::new()
-            .map(|transport| RetryTransport::new(transport).with_limiter(Arc::clone(&self.limiter)))
-            .map_err(|error| error.to_string())
+        limited_transport(&self.limiter)
     }
 
     fn save_accounts(&self) -> Result<(), String> {
@@ -559,29 +569,35 @@ async fn add_account_from_cookie(
 
 #[tauri::command]
 #[specta::specta]
-fn account_add_cookie(
+async fn account_add_cookie(
     cookie: String,
     alias: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Account, String> {
-    add_account_from_cookie_blocking(&AccountWriter::from_state(&state), &cookie, alias, None)
+    add_account_from_cookie(AccountWriter::from_state(&state), cookie, alias, None).await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_add_credentials(
+async fn account_add_credentials(
     username: String,
     password: String,
     alias: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Account, String> {
-    let transport = http_transport(&state)?;
-    let auth = AuthClient::new(&transport);
+    let writer = AccountWriter::from_state(&state);
+    let login_writer = writer.clone();
 
-    let cookie = auth
-        .login(&username, &password)
-        .map_err(|e| e.to_string())?;
-    account_add_cookie(cookie.to_string(), alias, state)
+    let cookie = run_blocking(move || {
+        let transport = login_writer.http_transport()?;
+        AuthClient::new(&transport)
+            .login(&username, &password)
+            .map(|cookie| cookie.to_string())
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+
+    add_account_from_cookie(writer, cookie, alias, None).await
 }
 
 #[tauri::command]
@@ -596,38 +612,35 @@ fn account_remove(user_id: f64, state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
-fn account_refresh(user_id: f64, state: State<AppState>) -> Result<Account, String> {
+async fn account_refresh(user_id: f64, state: State<'_, AppState>) -> Result<Account, String> {
     let uid = user_id as i64;
-    let cookie = {
-        let store = state.store.lock().map_err(|e| e.to_string())?;
-        let idx = store
-            .find_by_user_id(uid)
-            .ok_or_else(|| "không tìm thấy tài khoản".to_string())?;
-        let acc = store.get(idx).map_err(|e| e.to_string())?;
-        acc.cookie()
-            .ok_or_else(|| "tài khoản không có cookie".to_string())?
-            .to_owned()
-    };
+    let cookie = resolve_cookie(&state, Some(user_id))?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let transport = http_transport(&state)?;
-    let user_info = fetch_authenticated_user(&transport, &cookie).map_err(|e| e.to_string())?;
-    let robux = fetch_user_robux(&transport, uid, &cookie).unwrap_or(0);
-    let avatar = fetch_user_avatar_headshot(&transport, uid).unwrap_or(None);
+    let (user_info, robux, avatar) = run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let user_info = fetch_authenticated_user(&transport, &cookie).map_err(|e| e.to_string())?;
+        let robux = match fetch_user_robux(&transport, uid, &cookie) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                tracing::warn!(user_id = uid, %error, "không lấy được Robux, giữ số dư cũ");
+                None
+            }
+        };
+        let avatar = fetch_user_avatar_headshot(&transport, uid).ok().flatten();
+        Ok((user_info, robux, avatar))
+    })
+    .await?;
 
     let updated = {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
         let idx = store
             .find_by_user_id(uid)
             .ok_or_else(|| "không tìm thấy tài khoản".to_string())?;
-        let acc = store.get_mut(idx).map_err(|e| e.to_string())?;
-        acc.username = Some(user_info.name);
-        acc.set_field("DisplayName", user_info.display_name);
-        acc.set_field("Robux", robux.to_string());
-        if let Some(url) = avatar {
-            acc.set_field("AvatarUrl", url);
-        }
-        acc.last_attempted_refresh = now_local_json_net();
-        acc.clone()
+        let account = store.get_mut(idx).map_err(|e| e.to_string())?;
+        account.apply_profile(user_info.name, user_info.display_name, robux, avatar);
+        account.last_attempted_refresh = now_local_json_net();
+        account.clone()
     };
 
     state.save_accounts()?;
@@ -636,11 +649,11 @@ fn account_refresh(user_id: f64, state: State<AppState>) -> Result<Account, Stri
 
 #[tauri::command]
 #[specta::specta]
-fn account_launch(
+async fn account_launch(
     user_id: f64,
     place_id: f64,
     job_id: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     let uid = user_id as i64;
     let pid = place_id as i64;
@@ -678,44 +691,49 @@ fn account_launch(
         state.save_accounts()?;
     }
 
-    let transport = http_transport(&state)?;
-    let auth = AuthClient::new(&transport);
-    let csrf = auth.csrf_token(&cookie).map_err(|e| e.to_string())?;
-    let ticket = auth
-        .auth_ticket_with_csrf(&cookie, &csrf)
-        .map_err(|e| e.to_string())?;
-
     let multi_instance = state.multi_roblox_owned();
-
-    if check_launch_readiness(state.multi_roblox_enabled(), multi_instance)
-        == LaunchReadiness::MultiInstanceNotOwned
-    {
-        tracing::warn!(
-            user_id = uid,
-            "Multi-Roblox đang bật nhưng chưa giữ được mutex — acc thứ hai sẽ đóng acc thứ nhất"
-        );
-    }
-
+    let multi_enabled = state.multi_roblox_enabled();
     let auto_close = state
         .settings
         .lock()
         .map_err(|e| e.to_string())?
         .general
         .auto_close_last_process;
+    let limiter = Arc::clone(&state.limiter);
 
-    if decide_close(auto_close, multi_instance) == CloseDecision::CloseMatchingTracker {
-        let clients = list_running_clients();
-        let mut control = SystemClientControl;
-        close_previous_instances(&mut control, &clients, &tracker);
-    }
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let auth = AuthClient::new(&transport);
+        let csrf = auth.csrf_token(&cookie).map_err(|e| e.to_string())?;
+        let ticket = auth
+            .auth_ticket_with_csrf(&cookie, &csrf)
+            .map_err(|e| e.to_string())?;
 
-    let target = resolve_launch_target(&transport, pid, job_id.as_deref(), &csrf, &cookie)?;
+        if check_launch_readiness(multi_enabled, multi_instance)
+            == LaunchReadiness::MultiInstanceNotOwned
+        {
+            tracing::warn!(
+                user_id = uid,
+                "Multi-Roblox đang bật nhưng chưa giữ được mutex — acc thứ hai sẽ đóng acc thứ nhất"
+            );
+        }
 
-    let launch_url = build_launch_url(ticket.as_str(), &target, &tracker, now_unix_millis(), false);
+        if decide_close(auto_close, multi_instance) == CloseDecision::CloseMatchingTracker {
+            let clients = list_running_clients();
+            let mut control = SystemClientControl;
+            close_previous_instances(&mut control, &clients, &tracker);
+        }
 
-    launch_roblox_url(&launch_url).map_err(|e| e.to_string())?;
+        let target = resolve_launch_target(&transport, pid, job_id.as_deref(), &csrf, &cookie)?;
 
-    Ok(format!("Đã khởi chạy tài khoản {uid} vào game {pid}"))
+        let launch_url =
+            build_launch_url(ticket.as_str(), &target, &tracker, now_unix_millis(), false);
+
+        launch_roblox_url(&launch_url).map_err(|e| e.to_string())?;
+
+        Ok(format!("Đã khởi chạy tài khoản {uid} vào game {pid}"))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -814,21 +832,24 @@ fn vault_import_ram(
 
 #[tauri::command]
 #[specta::specta]
-fn presence_batch(user_ids: Vec<f64>) -> Result<Vec<PresenceInfo>, String> {
+async fn presence_batch(user_ids: Vec<f64>) -> Result<Vec<PresenceInfo>, String> {
     let ids: Vec<i64> = user_ids.into_iter().map(|id| id as i64).collect();
 
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
-    let presences = fetch_presences(&transport, &ids).map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+        let presences = fetch_presences(&transport, &ids).map_err(|e| e.to_string())?;
 
-    Ok(presences
-        .into_iter()
-        .map(|presence| PresenceInfo {
-            user_id: presence.user_id as f64,
-            presence_type: presence.user_presence_type,
-            place_id: presence.place_id,
-            last_online: presence.last_online,
-        })
-        .collect())
+        Ok(presences
+            .into_iter()
+            .map(|presence| PresenceInfo {
+                user_id: presence.user_id as f64,
+                presence_type: presence.user_presence_type,
+                place_id: presence.place_id,
+                last_online: presence.last_online,
+            })
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -891,63 +912,85 @@ fn account_csrf(
 
 #[tauri::command]
 #[specta::specta]
-fn account_check_pin(user_id: f64, state: State<AppState>) -> Result<PinInfo, String> {
+async fn account_check_pin(user_id: f64, state: State<'_, AppState>) -> Result<PinInfo, String> {
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let pin =
-        account_ext::check_pin(&transport, &cookie, Some(&csrf)).map_err(|e| e.to_string())?;
-    Ok(PinInfo::from(pin))
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        let pin =
+            account_ext::check_pin(&transport, &cookie, Some(&csrf)).map_err(|e| e.to_string())?;
+        Ok(PinInfo::from(pin))
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_unlock_pin(
+async fn account_unlock_pin(
     user_id: f64,
     pin: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<PinInfo, String> {
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let state_pin =
-        account_ext::unlock_pin(&transport, &cookie, &csrf, &pin).map_err(|e| e.to_string())?;
-    Ok(PinInfo::from(state_pin))
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        let state_pin =
+            account_ext::unlock_pin(&transport, &cookie, &csrf, &pin).map_err(|e| e.to_string())?;
+        Ok(PinInfo::from(state_pin))
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_set_follow_privacy(
+async fn account_set_follow_privacy(
     user_id: f64,
     privacy: i32,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let privacy = FollowPrivacy::from_index(privacy)
         .ok_or_else(|| "mức quyền riêng tư không hợp lệ".to_string())?;
 
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    account_ext::set_follow_privacy(&transport, &cookie, &csrf, privacy).map_err(|e| e.to_string())
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        account_ext::set_follow_privacy(&transport, &cookie, &csrf, privacy)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_set_display_name(
+async fn account_set_display_name(
     user_id: f64,
     name: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let uid = user_id as i64;
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
+    let requested = name.clone();
 
-    account_ext::set_display_name(&transport, &cookie, &csrf, uid, &name)
-        .map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        account_ext::set_display_name(&transport, &cookie, &csrf, uid, &requested)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
 
     {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -962,40 +1005,51 @@ fn account_set_display_name(
 
 #[tauri::command]
 #[specta::specta]
-fn account_set_avatar(
+async fn account_set_avatar(
     user_id: f64,
     avatar_json: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<f64>, String> {
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let outcome = account_ext::set_avatar(&transport, &cookie, &csrf, &avatar_json)
-        .map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
 
-    Ok(outcome
-        .invalid_asset_ids
-        .into_iter()
-        .map(|id| id as f64)
-        .collect())
+        let outcome = account_ext::set_avatar(&transport, &cookie, &csrf, &avatar_json)
+            .map_err(|e| e.to_string())?;
+
+        Ok(outcome
+            .invalid_asset_ids
+            .into_iter()
+            .map(|id| id as f64)
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_change_password(
+async fn account_change_password(
     user_id: f64,
     current: String,
     new_password: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let uid = user_id as i64;
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
+    let requested = new_password.clone();
 
-    let rotated = account_ext::change_password(&transport, &cookie, &csrf, &current, &new_password)
-        .map_err(|e| e.to_string())?;
+    let rotated = run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        account_ext::change_password(&transport, &cookie, &csrf, &current, &requested)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
 
     {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -1013,30 +1067,42 @@ fn account_change_password(
 
 #[tauri::command]
 #[specta::specta]
-fn account_change_email(
+async fn account_change_email(
     user_id: f64,
     password: String,
     email: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    account_ext::change_email(&transport, &cookie, &csrf, &password, &email)
-        .map_err(|e| e.to_string())
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        account_ext::change_email(&transport, &cookie, &csrf, &password, &email)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_logout_other_sessions(user_id: f64, state: State<AppState>) -> Result<(), String> {
+async fn account_logout_other_sessions(
+    user_id: f64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let uid = user_id as i64;
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let rotated = account_ext::logout_other_sessions(&transport, &cookie, &csrf)
-        .map_err(|e| e.to_string())?;
+    let rotated = run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        account_ext::logout_other_sessions(&transport, &cookie, &csrf).map_err(|e| e.to_string())
+    })
+    .await?;
 
     if let Some(token) = rotated {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -1055,48 +1121,63 @@ fn account_logout_other_sessions(user_id: f64, state: State<AppState>) -> Result
 
 #[tauri::command]
 #[specta::specta]
-fn account_block_user(
+async fn account_block_user(
     user_id: f64,
     target_id: f64,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
-
-    let status = account_ext::block_user(&transport, &cookie, &csrf, target_id as i64, false)
-        .map_err(|e| e.to_string())?;
-    Ok((200..300).contains(&status))
+    set_blocked(user_id, target_id, false, &state).await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_unblock_user(
+async fn account_unblock_user(
     user_id: f64,
     target_id: f64,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
-    let csrf = account_csrf(&transport, &cookie)?;
+    set_blocked(user_id, target_id, true, &state).await
+}
 
-    let status = account_ext::block_user(&transport, &cookie, &csrf, target_id as i64, true)
-        .map_err(|e| e.to_string())?;
-    Ok((200..300).contains(&status))
+async fn set_blocked(
+    user_id: f64,
+    target_id: f64,
+    unblock: bool,
+    state: &AppState,
+) -> Result<bool, String> {
+    let cookie = resolve_cookie(state, Some(user_id))?;
+    let limiter = Arc::clone(&state.limiter);
+
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let csrf = account_csrf(&transport, &cookie)?;
+
+        let status = account_ext::block_user(&transport, &cookie, &csrf, target_id as i64, unblock)
+            .map_err(|e| e.to_string())?;
+        Ok((200..300).contains(&status))
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn account_blocked_list(user_id: f64, state: State<AppState>) -> Result<Vec<f64>, String> {
+async fn account_blocked_list(
+    user_id: f64,
+    state: State<'_, AppState>,
+) -> Result<Vec<f64>, String> {
     let cookie = resolve_cookie(&state, Some(user_id))?;
-    let transport = http_transport(&state)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    let body = account_ext::blocked_list(&transport, &cookie).map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        let body = account_ext::blocked_list(&transport, &cookie).map_err(|e| e.to_string())?;
 
-    Ok(account_ext::parse_blocked_user_ids(&body)
-        .into_iter()
-        .map(|id| id as f64)
-        .collect())
+        Ok(account_ext::parse_blocked_user_ids(&body)
+            .into_iter()
+            .map(|id| id as f64)
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1277,38 +1358,44 @@ fn group_assign(user_id: f64, group: String, state: State<AppState>) -> Result<(
 
 #[tauri::command]
 #[specta::specta]
-fn servers_list(place_id: f64, cursor: Option<String>) -> Result<ServersPage, String> {
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
-    servers::fetch_public_servers(&transport, place_id as i64, cursor.as_deref())
-        .map_err(|e| e.to_string())
+async fn servers_list(place_id: f64, cursor: Option<String>) -> Result<ServersPage, String> {
+    run_blocking(move || {
+        let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+        servers::fetch_public_servers(&transport, place_id as i64, cursor.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn servers_pick_job(
+async fn servers_pick_job(
     place_id: f64,
     max_pages: u32,
     lowest_players: bool,
 ) -> Result<Option<String>, String> {
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
-    let pick = if lowest_players {
-        ServerPick::LowestPlayers
-    } else {
-        ServerPick::Random
-    };
+    run_blocking(move || {
+        let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+        let pick = if lowest_players {
+            ServerPick::LowestPlayers
+        } else {
+            ServerPick::Random
+        };
 
-    servers::choose_job_id(&transport, place_id as i64, max_pages, pick, |count| {
-        servers::random_index_below(count).unwrap_or(0)
+        servers::choose_job_id(&transport, place_id as i64, max_pages, pick, |count| {
+            servers::random_index_below(count).unwrap_or(0)
+        })
+        .map_err(|e| e.to_string())
     })
-    .map_err(|e| e.to_string())
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn game_details(
+async fn game_details(
     place_ids: Vec<f64>,
     user_id: Option<f64>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<GameDetails>, String> {
     let ids: Vec<i64> = place_ids.into_iter().map(|id| id as i64).collect();
     if ids.is_empty() {
@@ -1316,19 +1403,23 @@ fn game_details(
     }
 
     let cookie = resolve_cookie(&state, user_id)?;
-    let transport = http_transport(&state)?;
+    let limiter = Arc::clone(&state.limiter);
 
-    games::fetch_place_details(&transport, &cookie, &ids).map_err(|e| e.to_string())
+    run_blocking(move || {
+        let transport = limited_transport(&limiter)?;
+        games::fetch_place_details(&transport, &cookie, &ids).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[specta::specta]
-fn thumbnails_batch(requests: Vec<ThumbnailRequestInput>) -> Result<Vec<ThumbnailResult>, String> {
+async fn thumbnails_batch(
+    requests: Vec<ThumbnailRequestInput>,
+) -> Result<Vec<ThumbnailResult>, String> {
     if requests.is_empty() {
         return Ok(Vec::new());
     }
-
-    let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
 
     let inputs: Vec<batch::ThumbnailRequest> = requests
         .into_iter()
@@ -1344,15 +1435,19 @@ fn thumbnails_batch(requests: Vec<ThumbnailRequestInput>) -> Result<Vec<Thumbnai
         })
         .collect();
 
-    let results = batch::fetch_thumbnails(&transport, &inputs).map_err(|e| e.to_string())?;
+    run_blocking(move || {
+        let transport = ReqwestTransport::new().map_err(|e| e.to_string())?;
+        let results = batch::fetch_thumbnails(&transport, &inputs).map_err(|e| e.to_string())?;
 
-    Ok(results
-        .into_iter()
-        .map(|(asset_id, url)| ThumbnailResult {
-            asset_id: asset_id as f64,
-            url,
-        })
-        .collect())
+        Ok(results
+            .into_iter()
+            .map(|(asset_id, url)| ThumbnailResult {
+                asset_id: asset_id as f64,
+                url,
+            })
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1434,6 +1529,14 @@ fn recent_push(
 
 pub const LOGIN_WINDOW_LABEL: &str = "roblox-login";
 
+fn webview_data_dir() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("dev.muster.app")
+        .join("WebView2")
+}
+
 /// Build the main window explicitly.
 ///
 /// `app.windows[].create` in `tauri.conf.json` is `false`, and Tauri's own `setup()` creates its
@@ -1441,26 +1544,16 @@ pub const LOGIN_WINDOW_LABEL: &str = "roblox-login";
 /// the error is returned as a string and rendered by `run()` instead of triggering an opaque
 /// `panic!("Failed to setup app")` from inside Tauri.
 fn create_main_window(app: &tauri::App) -> Result<(), String> {
-    // Pin WebView2's user-data folder to %APPDATA%\dev.muster.app\WebView2 so it is
-    // always owned by the current user. Without this, a single admin run leaves the
-    // default %LOCALAPPDATA%\dev.muster.app folder owned by SYSTEM/Administrator,
-    // causing "Access is denied (os error 5)" on every subsequent non-elevated launch.
-    //
-    // %APPDATA% (Roaming) is always set on Windows and is always writable by the
-    // current user regardless of elevation level, so we do not need the `dirs` crate.
-    let webview_data_dir = std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("dev.muster.app")
-        .join("WebView2");
-
+    // The user-data folder is pinned under %APPDATA% so it is always owned by the current user.
+    // Without this, a single admin run leaves the default %LOCALAPPDATA%\dev.muster.app folder
+    // owned by SYSTEM/Administrator, causing "Access is denied (os error 5)" on later launches.
     tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
         .title("Muster")
         .inner_size(1200.0, 800.0)
         .min_inner_size(900.0, 600.0)
         .resizable(true)
         .disable_drag_drop_handler()
-        .data_directory(webview_data_dir)
+        .data_directory(webview_data_dir())
         .build()
         .map(|_window| ())
         .map_err(|error| format!("không tạo được cửa sổ chính: {error:?}"))
@@ -1539,6 +1632,8 @@ async fn browser_open_login(
     .title("Đăng nhập Roblox — Muster")
     .inner_size(860.0, 780.0)
     .center()
+    .data_directory(webview_data_dir())
+    .incognito(true)
     .build()
     .map_err(|e| e.to_string())?;
 

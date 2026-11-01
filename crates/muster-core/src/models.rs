@@ -106,6 +106,23 @@ impl Account {
     pub fn remove_field(&mut self, name: &str) -> Option<String> {
         self.fields.remove(name)
     }
+
+    pub fn apply_profile(
+        &mut self,
+        username: String,
+        display_name: String,
+        robux: Option<u64>,
+        avatar_url: Option<String>,
+    ) {
+        self.username = Some(username);
+        self.set_field("DisplayName", display_name);
+        if let Some(robux) = robux {
+            self.set_field("Robux", robux.to_string());
+        }
+        if let Some(url) = avatar_url {
+            self.set_field("AvatarUrl", url);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -261,5 +278,54 @@ mod tests {
             "lo mat khau trong Debug: {text}"
         );
         assert!(text.contains("alice"), "van phai hien phan khong bi mat");
+    }
+
+    #[test]
+    fn apply_profile_keeps_previous_robux_and_avatar_when_fetch_failed() {
+        let mut account = sample();
+        account.set_field("Robux", "1500");
+        account.set_field("AvatarUrl", "https://old.example/avatar.png");
+
+        account.apply_profile("alice2".to_owned(), "Alice Two".to_owned(), None, None);
+
+        assert_eq!(account.username.as_deref(), Some("alice2"));
+        assert_eq!(account.get_field("DisplayName"), "Alice Two");
+        assert_eq!(
+            account.get_field("Robux"),
+            "1500",
+            "loi mang khong duoc ghi de so du bang 0"
+        );
+        assert_eq!(
+            account.get_field("AvatarUrl"),
+            "https://old.example/avatar.png"
+        );
+    }
+
+    #[test]
+    fn apply_profile_writes_a_real_zero_balance() {
+        let mut account = sample();
+        account.set_field("Robux", "1500");
+
+        account.apply_profile("alice".to_owned(), "Alice".to_owned(), Some(0), None);
+
+        assert_eq!(account.get_field("Robux"), "0");
+    }
+
+    #[test]
+    fn apply_profile_writes_robux_and_avatar_when_present() {
+        let mut account = sample();
+
+        account.apply_profile(
+            "alice".to_owned(),
+            "Alice".to_owned(),
+            Some(42),
+            Some("https://new.example/avatar.png".to_owned()),
+        );
+
+        assert_eq!(account.get_field("Robux"), "42");
+        assert_eq!(
+            account.get_field("AvatarUrl"),
+            "https://new.example/avatar.png"
+        );
     }
 }
