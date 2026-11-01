@@ -1,10 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { commands } from "../bindings";
 import type {
   Account,
-  BrowserProgress,
-  BrowserStatus,
   FavoriteGame_Serialize,
   GameDetails,
   GroupInfo,
@@ -57,8 +54,6 @@ interface AppState {
   games: Record<number, GameDetails>;
   gameThumbnails: Record<number, string>;
   gamesLoading: boolean;
-  browser: BrowserStatus | null;
-  browserProgress: BrowserProgress | null;
   browserBusy: boolean;
 
   setActiveTab: (tab: NavigationTab) => void;
@@ -104,8 +99,6 @@ interface AppState {
   refreshRecent: () => Promise<void>;
   pushRecent: (name: string, placeId: number) => Promise<void>;
   refreshGames: (placeIds: number[]) => Promise<void>;
-  refreshBrowser: () => Promise<void>;
-  downloadChromium: () => Promise<boolean>;
   openBrowserLogin: (
     username: string | null,
     password: string | null
@@ -142,8 +135,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   games: {},
   gameThumbnails: {},
   gamesLoading: false,
-  browser: null,
-  browserProgress: null,
   browserBusy: false,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -667,53 +658,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ gameThumbnails: nextThumb });
       }
     } catch {
-      /* dữ liệu trò chơi chỉ là enhancement, không chặn khiển.launch */
+      // Dữ liệu game chỉ là phần bổ trợ, lỗi ở đây không được chặn việc mở game.
     } finally {
       set({ gamesLoading: false });
-    }
-  },
-
-
-  refreshBrowser: async () => {
-    try {
-      const status = await commands.browserStatus();
-      set({ browser: status });
-    } catch {
-      set({ browser: null });
-    }
-  },
-
-  downloadChromium: async () => {
-    const { notify } = get();
-    set({
-      browserBusy: true,
-      browserProgress: {
-        phase: "connecting",
-        downloaded: 0,
-        total: 0,
-        percent: 0,
-      },
-    });
-
-    let unlisten: (() => void) | undefined;
-    try {
-      unlisten = await listen<BrowserProgress>("browser-download", (event) => {
-        set({ browserProgress: event.payload });
-      });
-      const res = await commands.browserDownloadChromium();
-      if (res.status === "ok") {
-        notify("Chromium da san sang");
-        await get().refreshBrowser();
-        return true;
-      }
-      notify(`Loi tai Chromium: ${res.error}`);
-      return false;
-    } catch (e) {
-      notify(`Loi tai Chromium: ${String(e)}`);
-      return false;
-    } finally {
-      unlisten?.();
-      set({ browserBusy: false, browserProgress: null });
     }
   },
 

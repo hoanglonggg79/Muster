@@ -42,8 +42,6 @@ export const commands = {
 	favoriteRemove: (placeId: number | null, privateServer: string | null) => typedError<FavoriteGame_Serialize[], string>(__TAURI_INVOKE("favorite_remove", { placeId, privateServer })),
 	recentGames: () => typedError<RecentGame_Serialize[], string>(__TAURI_INVOKE("recent_games")),
 	recentPush: (name: string, placeId: number | null) => typedError<RecentGame_Serialize[], string>(__TAURI_INVOKE("recent_push", { name, placeId })),
-	browserStatus: () => __TAURI_INVOKE<BrowserStatus>("browser_status"),
-	browserDownloadChromium: () => typedError<string, string>(__TAURI_INVOKE("browser_download_chromium")),
 	browserOpenLogin: (username: string | null, password: string | null) => typedError<Account_Serialize, string>(__TAURI_INVOKE("browser_open_login", { username, password })),
 };
 
@@ -87,19 +85,6 @@ export type AppInitState = {
 };
 
 export type Branch = "PasswordLocked" | "Dpapi" | "PlainJson";
-
-export type BrowserProgress = {
-	phase: string,
-	downloaded: number,
-	total: number,
-	percent: number,
-};
-
-export type BrowserStatus = {
-	chrome_for_testing: string | null,
-	chrome_for_testing_version: string | null,
-	ready: boolean,
-};
 
 export type FavoriteGame = FavoriteGame_Serialize | FavoriteGame_Deserialize;
 

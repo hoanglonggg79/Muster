@@ -8,7 +8,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { type DragEvent, useEffect, useState } from "react";
+import { type DragEvent, useState } from "react";
 import { commands } from "../../bindings";
 import { useAppStore } from "../../store/useAppStore";
 
@@ -115,7 +115,6 @@ export function AddAccountModal() {
   const notify = useAppStore((s) => s.notify);
 
   const browserBusy = useAppStore((s) => s.browserBusy);
-  const refreshBrowser = useAppStore((s) => s.refreshBrowser);
   const openBrowserLogin = useAppStore((s) => s.openBrowserLogin);
 
   const [addTab, setAddTab] = useState<AddTab>("cookie");
@@ -128,12 +127,6 @@ export function AddAccountModal() {
   const [tkpassMode, setTkpassMode] = useState<TkPassMode>("api");
   const [tkpassProcessing, setTkpassProcessing] = useState(false);
   const [tkpassResults, setTkpassResults] = useState<LineResult[]>([]);
-
-  useEffect(() => {
-    if (showAddModal) {
-      refreshBrowser();
-    }
-  }, [showAddModal, refreshBrowser]);
 
   if (!showAddModal) return null;
 

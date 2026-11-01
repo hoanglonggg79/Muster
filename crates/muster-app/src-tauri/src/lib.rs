@@ -35,7 +35,7 @@ use muster_core::vault::{self, Branch, Format};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use specta_typescript::Typescript;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tauri_specta::{Builder, collect_commands};
 
 pub const SAVED_PLACE_ID_FIELD: &str = "SavedPlaceId";
@@ -1207,21 +1207,6 @@ pub struct GroupInfo {
     pub count: u32,
 }
 
-#[derive(Debug, Serialize, Clone, Type)]
-pub struct BrowserStatus {
-    pub chrome_for_testing: Option<String>,
-    pub chrome_for_testing_version: Option<String>,
-    pub ready: bool,
-}
-
-#[derive(Debug, Serialize, Clone, Type)]
-pub struct BrowserProgress {
-    pub phase: String,
-    pub downloaded: u32,
-    pub total: u32,
-    pub percent: u32,
-}
-
 #[derive(Debug, Deserialize, Type)]
 pub struct ThumbnailRequestInput {
     pub asset_id: f64,
@@ -1236,10 +1221,7 @@ pub struct ThumbnailResult {
     pub url: String,
 }
 
-pub const BROWSER_PROGRESS_EVENT: &str = "browser-download";
-pub const BROWSER_DEVTOOLS_TIMEOUT_SECONDS: u64 = 30;
 pub const BROWSER_LOGIN_TIMEOUT_SECONDS: u64 = 600;
-pub const BROWSER_FORM_TIMEOUT_SECONDS: u64 = 60;
 
 /// How often the login loop asks WebView2 for cookies.
 pub const COOKIE_POLL_INTERVAL_MS: u64 = 800;
@@ -1561,47 +1543,6 @@ fn create_main_window(app: &tauri::App) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
-fn browser_status() -> BrowserStatus {
-    BrowserStatus {
-        ready: true,
-        chrome_for_testing: None,
-        chrome_for_testing_version: Some("Edge WebView2 (Native Windows)".to_string()),
-    }
-}
-
-fn to_u32(value: f64) -> u32 {
-    if !value.is_finite() || value <= 0.0 {
-        return 0;
-    }
-    value.min(f64::from(u32::MAX)) as u32
-}
-
-fn emit_browser_progress(app: &AppHandle, phase: &str, downloaded: f64, total: f64) {
-    let percent = if total > 0.0 {
-        to_u32((downloaded / total * 100.0).clamp(0.0, 100.0))
-    } else {
-        0
-    };
-
-    let _ = app.emit(
-        BROWSER_PROGRESS_EVENT,
-        BrowserProgress {
-            phase: phase.to_owned(),
-            downloaded: to_u32(downloaded),
-            total: to_u32(total),
-            percent,
-        },
-    );
-}
-
-#[tauri::command]
-#[specta::specta]
-async fn browser_download_chromium() -> Result<String, String> {
-    Ok("WebView2 sẵn sàng".to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
 async fn browser_open_login(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1622,8 +1563,6 @@ async fn browser_open_login(
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
-    emit_browser_progress(&app, "launching", 0.0, 0.0);
-
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         LOGIN_WINDOW_LABEL,
@@ -1636,8 +1575,6 @@ async fn browser_open_login(
     .incognito(true)
     .build()
     .map_err(|e| e.to_string())?;
-
-    emit_browser_progress(&app, "waiting-login", 0.0, 0.0);
 
     if let (Some(user), Some(pass)) = (
         username.filter(|u| !u.trim().is_empty()),
@@ -1717,8 +1654,6 @@ async fn browser_open_login(
         }
     };
 
-    emit_browser_progress(&app, "ready", 1.0, 1.0);
-
     // `add_account_from_cookie` performs blocking HTTP via `reqwest::blocking`, which owns a Tokio
     // runtime. It must run on a blocking thread: dropping that runtime on an async worker panics.
     add_account_from_cookie(
@@ -1777,12 +1712,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             favorite_remove,
             recent_games,
             recent_push,
-            browser_status,
-            browser_download_chromium,
             browser_open_login,
         ])
         .typ::<Account>()
-        .typ::<BrowserProgress>()
 }
 
 #[must_use]

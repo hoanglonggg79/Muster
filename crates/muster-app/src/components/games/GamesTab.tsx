@@ -58,7 +58,9 @@ export function GamesTab() {
       refreshGames([Number(q)]);
       return;
     }
-    const match = PRESET_GAMES.find((game) => game.name.toLowerCase() === q);
+    const match =
+      PRESET_GAMES.find((game) => game.name.toLowerCase() === searchLower) ??
+      (filteredPresets.length === 1 ? filteredPresets[0] : undefined);
     if (match) {
       setPlaceId(match.placeId);
       refreshGames([Number(match.placeId)]);
