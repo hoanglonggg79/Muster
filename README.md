@@ -12,10 +12,10 @@ Windows. Rust + Tauri 2 + React + TypeScript. Giấy phép **GPL-3.0**.
 
 **M0 xong hoàn toàn (0.1 → 0.8).** **M1 ĐÃ ĐÓNG (2026-10-12) — đã nghiệm thu chạy thật 2026-10-31.**
 **GĐ 2A xong** (Local HTTP API 22 route). **GĐ 2C gần xong** (game/account + UI). **GĐ 2D**: đăng nhập
-qua **WebView2 native** (đã nghiệm thu 2026-10-31) — `core::watcher` chưa viết. **41 command Tauri.**
+qua **WebView2 native** (đã nghiệm thu 2026-10-31) — `core::watcher` chưa viết. **39 command Tauri.**
 Chi tiết: `ROADMAP.md` §9.
 
-Cổng đo ngày 2026-10-31: **364 test xanh** (315 core + 11 vault + 38 api), `tsc` sạch, lint Biome
+Cổng đo ngày 2026-10-31: **367 test xanh** (318 core + 11 vault + 38 api), `tsc` sạch, lint Biome
 **0 error / 0 warning** (21 file), `clippy -D warnings` sạch, bindings khớp codegen — chi tiết ở
 `ROADMAP.md` §5.
 
@@ -94,7 +94,7 @@ Nếu bạn thấy mình đang viết thuật toán trong `src-tauri` — chuy�
 
 ```bash
 cargo test                     # 3 crate nhẹ (default-members) — nhanh, dùng hằng ngày
-cargo test --workspace         # toàn bộ, gồm cả crate Tauri — 364 test
+cargo test --workspace         # toàn bộ, gồm cả crate Tauri — 367 test
 cargo check --workspace        # gồm cả crate Tauri — chậm hơn
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
